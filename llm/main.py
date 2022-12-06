@@ -185,8 +185,11 @@ def main(cfg):
         loggers=loggers,
         callbacks=callbacks,
         precision=cfg.precision,
-        # grad_clip_norm=cfg.grad_clip_norm,
-        algorithms=[GradientClipping(clipping_type='norm', clipping_threshold=cfg.grad_clip_norm), ],
+        algorithms=[
+            GradientClipping(
+                clipping_type='norm',
+                clipping_threshold=cfg.grad_clip_norm
+            )],
         grad_accum=cfg.device_train_grad_accum,
         fsdp_config=fsdp_config,  # type: ignore
         save_folder=cfg.get('save_folder', None),
