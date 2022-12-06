@@ -22,9 +22,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
     parser.add_argument('--project', type=str, default='thruput')
-    # parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
-    parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
-    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])
+    parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
+    parser.add_argument('-t', '--precisions', '--types', type=str, default=['bf16'], nargs='+', choices=['bf16', 'fp16'])
+    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
     parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
@@ -112,12 +112,13 @@ def mod_parameters(
     max_seq_len,
     global_train_batch_size,
     precision,
+    fsdp_config_mixed_precision='DEFAULT',
     run_name='',
     streaming_data=False,
     max_duration='15ba',
     eval_interval='500ba',
     wandb=True,
-    microbatch_size='auto'  # TODO: update to 'auto' when composer v12 drops (currently broken)
+    microbatch_size=None  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in v1.13)
 ):
     if run_name:
         parameters['run_name'] = run_name
@@ -138,9 +139,10 @@ def mod_parameters(
     parameters['eval_loader']['dataset']['max_seq_len'] = max_seq_len
 
     parameters['global_train_batch_size'] = global_train_batch_size
-    # TODO: update to 'auto' when composer v12 drops (currently broken) which allow composer to set batch size
-    parameters['device_train_microbatch_size'] = microbatch_size
-    parameters['device_eval_microbatch_size'] = microbatch_size
+    if microbatch_size is not None:
+        # TODO: update to 'auto' when composer v12 drops (currently broken) which allow composer to set batch size
+        parameters['device_train_microbatch_size'] = microbatch_size
+        parameters['device_eval_microbatch_size'] = microbatch_size
 
     parameters['train_loader']['dataset']['split'] = 'val'  # for throughput testing purposess
     parameters['eval_loader']['eval_subset_num_batches'] = 5  # for throughput testing purposes
@@ -149,7 +151,7 @@ def mod_parameters(
     parameters['eval_interval'] = eval_interval
 
     parameters['precision'] = precision
-    parameters['fsdp_config']['mixed_precision'] = 'PURE'
+    parameters['fsdp_config']['mixed_precision'] = fsdp_config_mixed_precision
 
     if wandb:
         # add wandb
@@ -177,7 +179,7 @@ def get_integrations(project, wandb=True):
 
 def run_config(config, project, image, RUN):
 
-    yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision = config
+    yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision, fsdp_config_mixed_precision = config
 
     streaming_data = True if "https" in yaml_base else False
     integrations = get_integrations(project)  # point to git repo and potentially wandb
@@ -210,7 +212,14 @@ def run_config(config, project, image, RUN):
         name = name[:(name_len_lim + 1)]
         print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
-    parameters = mod_parameters(parameters, max_seq_len, global_train_batch_size, precision, run_name=name, streaming_data=streaming_data)
+    parameters = mod_parameters(
+        parameters,
+        max_seq_len,
+        global_train_batch_size,
+        precision,
+        fsdp_config_mixed_precision=fsdp_config_mixed_precision,
+        run_name=name,
+        streaming_data=streaming_data)
 
     # Create run config mcli sdk/api
     config = RunConfig(
@@ -250,7 +259,16 @@ if __name__ == '__main__':
                         for precision in args.precisions:
                             for model_yaml in args.model_yamls:
 
-                                config = (args.yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision)
+                                config = (
+                                    args.yaml_base,
+                                    model_yaml,
+                                    max_seq_len,
+                                    global_train_batch_size,
+                                    cluster,
+                                    gpu_type,
+                                    gpu_num,
+                                    precision,
+                                    args.fsdp_config_mixed_precision)
                                 print(config)
                                 run_config(config, project=args.project, image=args.image, RUN=args.RUN)
                                 n_jobs += 1
