@@ -36,10 +36,10 @@ def parse_args():
                         nargs='+', help='model sizes to test')
 
     # NOTE: based on mosaic internal use clusters 
-    parser.add_argument('-c', '--clusters', type=str, default=['r1z1', 'r7z2'], nargs='+', choices=['r1z1', 'r7z2'])
+    parser.add_argument('-c', '--clusters', type=str, default=['r1z1'], nargs='+', choices=['r1z1', 'r7z2'])
     known_args = parser.parse_known_args()[0]
     _gpu_types = get_gpu_types(known_args.clusters)
-    parser.add_argument('--gpu_types', type=str, default=['a100_40gb', 'a100_80gb'], nargs='+', choices=_gpu_types)
+    parser.add_argument('--gpu_types', type=str, default=['a100_80gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
     parser.add_argument('-g', '--gpu_nums', type=int, default=[1, 8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
@@ -115,15 +115,14 @@ def mod_parameters(
     fsdp_config_mixed_precision='DEFAULT',
     run_name='',
     streaming_data=False,
-    max_duration='15ba',
+    max_duration='12ba',
     eval_interval='500ba',
     wandb=True,
-    microbatch_size=None  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in v1.13)
+    microbatch_size=None  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in torch==1.13)
 ):
     if run_name:
         parameters['run_name'] = run_name
     if streaming_data:
-        # parameters['data_remote'] = "s3://mosaicml-internal-dataset-c4/mds/1"
         parameters['data_remote'] = "s3://mosaicml-internal-dataset-c4/mds/2"
         parameters['train_loader']['dataset']['remote'] = parameters['data_remote']
         parameters['eval_loader']['dataset']['remote'] = parameters['data_remote']
@@ -163,8 +162,8 @@ def mod_parameters(
 def get_integrations(project, wandb=True):
     integrations = [{
         'integration_type': 'git_repo',
-        'git_repo': 'vchiley/mosaicml-benchmarks',
-        'git_branch': 'llm-throughput',
+        'git_repo': 'mosaicml/benchmarks',
+        'git_branch': 'main',
         'pip_install': '-r llm/requirements.txt'
     }]
     if wandb:
@@ -187,13 +186,13 @@ def run_config(config, project, image, RUN):
     # Define our command
     if streaming_data:
         command = """
-        composer mosaicml-benchmarks/llm/main.py /mnt/config/parameters.yaml
+        composer benchmarks/llm/main.py /mnt/config/parameters.yaml
         """
     else:
         command = """
-        python mosaicml-benchmarks/llm/convert_c4.py --out_root ./my-copy-c4 --splits val
+        python benchmarks/llm/convert_c4.py --out_root ./my-copy-c4 --splits val
 
-        composer mosaicml-benchmarks/llm/main.py /mnt/config/parameters.yaml
+        composer benchmarks/llm/main.py /mnt/config/parameters.yaml
         """
 
     yaml_file = yaml_base + model_yaml
@@ -210,7 +209,7 @@ def run_config(config, project, image, RUN):
     if len(name) > name_len_lim:
         _name = name
         name = name[:(name_len_lim + 1)]
-        print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
+        # print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
     parameters = mod_parameters(
         parameters,
@@ -245,6 +244,23 @@ def run_config(config, project, image, RUN):
         print(f'Launching run {run.name}')
 
 
+def run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16):
+    _params = model_yaml.replace('.yaml', '')
+    params, mult  = int(_params[:-1]), _params[-1]
+    if mult == 'm':
+        b_params = params / 1000
+    elif mult == 'b':
+        b_params = params
+    else:
+        raise ValueError
+
+    gpu_mem = int(gpu_type.split('_')[-1][:-2])
+
+    if p_multiplier * b_params > gpu_num * gpu_mem:
+        print(f'WARNING: will not be running {model_yaml=} on {gpu_num=} {gpu_type=} since it probably will not fit into memory')
+        return False
+    return True
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -259,18 +275,21 @@ if __name__ == '__main__':
                         for precision in args.precisions:
                             for model_yaml in args.model_yamls:
 
-                                config = (
-                                    args.yaml_base,
-                                    model_yaml,
-                                    max_seq_len,
-                                    global_train_batch_size,
-                                    cluster,
-                                    gpu_type,
-                                    gpu_num,
-                                    precision,
-                                    args.fsdp_config_mixed_precision)
-                                print(config)
-                                run_config(config, project=args.project, image=args.image, RUN=args.RUN)
-                                n_jobs += 1
+                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16)
+
+                                if run:
+                                    config = (
+                                        args.yaml_base,
+                                        model_yaml,
+                                        max_seq_len,
+                                        global_train_batch_size,
+                                        cluster,
+                                        gpu_type,
+                                        gpu_num,
+                                        precision,
+                                        args.fsdp_config_mixed_precision)
+                                    print(config)
+                                    run_config(config, project=args.project, image=args.image, RUN=args.RUN)
+                                    n_jobs += 1
 
     print(f'{n_jobs=}')
