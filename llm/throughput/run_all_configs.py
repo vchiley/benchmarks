@@ -195,13 +195,13 @@ def run_config(config, args, project, image, RUN):
     if streaming_data:
         command = """
         python -c "import torch; print(torch.__version__)"
-        
+
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
         """
     else:
         command = """
         python -c "import torch; print(torch.__version__)"
-        
+
         python benchmarks/llm/convert_c4.py --out_root ./my-copy-c4 --splits val
 
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
