@@ -49,6 +49,8 @@ def parse_args():
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
     parser.add_argument('-g', '--gpu_nums', type=int, default=[1, 8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
 
+    parser.add_argument('--microbatch_size_auto', action='set microbatch_size to auto')
+
     parser.add_argument('--RUN', action='store_true')
 
     return parser.parse_args()
@@ -181,7 +183,7 @@ def get_integrations(project, wandb=True):
     return integrations
 
 
-def run_config(config, project, image, RUN):
+def run_config(config, args, project, image, RUN):
 
     yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision, fsdp_config_mixed_precision = config
 
@@ -216,6 +218,7 @@ def run_config(config, project, image, RUN):
         name = name[:(name_len_lim + 1)]
         print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
+    microbatch_size = "auto" if args.microbatch_size_auto else None
     parameters = mod_parameters(
         parameters,
         max_seq_len,
@@ -223,7 +226,8 @@ def run_config(config, project, image, RUN):
         precision,
         fsdp_config_mixed_precision=fsdp_config_mixed_precision,
         run_name=name,
-        streaming_data=streaming_data)
+        streaming_data=streaming_data,
+        microbatch_size=microbatch_size)
 
     # Create run config mcli sdk/api
     config = RunConfig(
@@ -293,7 +297,7 @@ if __name__ == '__main__':
                                         precision,
                                         args.fsdp_config_mixed_precision)
                                     print(config)
-                                    run_config(config, project=args.project, image=args.image, RUN=args.RUN)
+                                    run_config(config, args, project=args.project, image=args.image, RUN=args.RUN)
                                     n_jobs += 1
 
     print(f'{n_jobs=}')
