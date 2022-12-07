@@ -1,5 +1,4 @@
 import argparse
-import mcli
 from mcli import sdk as msdk
 
 

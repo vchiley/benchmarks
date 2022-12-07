@@ -16,8 +16,9 @@ CLUSTER_INFO = {
 def parse_args():    
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
-    parser.add_argument('--project', type=str, default='thruput')
-    parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
+    parser.add_argument('--project', type=str, default='tput-auto')
+    # parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
+    parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
     parser.add_argument('-t', '--precisions', '--types', type=str, default=['bf16'], nargs='+', choices=['bf16'])  # ['bf16', 'fp16']
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
