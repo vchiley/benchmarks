@@ -1,8 +1,3 @@
-# prof gpt paper models
-# 16 x params is number of gpus u need
-
-
-
 import argparse
 import requests
 import yaml
@@ -23,7 +18,7 @@ def parse_args():
 
     parser.add_argument('--project', type=str, default='thruput')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
-    parser.add_argument('-t', '--precisions', '--types', type=str, default=['bf16'], nargs='+', choices=['bf16', 'fp16'])
+    parser.add_argument('-t', '--precisions', '--types', type=str, default=['bf16'], nargs='+', choices=['bf16'])  # ['bf16', 'fp16']
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
@@ -31,7 +26,17 @@ def parse_args():
                         help='exponent of batch size (in tokens) to be tested (default: [19, 23] = 2^19 to 2^23)')  # 4M
     parser.add_argument('--yaml_base', type=str, default='https://raw.githubusercontent.com/mosaicml/benchmarks/main/llm/yamls/mosaic_gpt/')
     parser.add_argument('-m', '--model_yamls', type=str,
-                        default=['125m.yaml', '350m.yaml', '760m.yaml', '1b.yaml', '3b.yaml', '7b.yaml', '13b.yaml'],
+                        default=[
+                            # '125m.yaml',
+                            # '350m.yaml',
+                            # '760m.yaml',
+                            # '1b.yaml',
+                            # '3b.yaml',
+                            # '7b.yaml',
+                            # '13b.yaml',
+                            # '30b.yaml',
+                            # '70b.yaml'
+                        ],
                         choices=['125m.yaml', '350m.yaml', '760m.yaml', '1b.yaml', '3b.yaml', '7b.yaml', '13b.yaml', '30b.yaml', '70b.yaml'],
                         nargs='+', help='model sizes to test')
 
@@ -144,7 +149,7 @@ def mod_parameters(
         parameters['device_eval_microbatch_size'] = microbatch_size
 
     parameters['train_loader']['dataset']['split'] = 'val'  # for throughput testing purposess
-    parameters['eval_loader']['eval_subset_num_batches'] = 5  # for throughput testing purposes
+    parameters['eval_loader']['eval_subset_num_batches'] = 2  # for throughput testing purposes
 
     parameters['max_duration'] = max_duration
     parameters['eval_interval'] = eval_interval
@@ -203,13 +208,13 @@ def run_config(config, project, image, RUN):
     if 'mosaic' in model_name:
         model_name.pop(model_name.index('mosaic'))
     model_name = ''.join(model_name)
-    name = f"{project}-{model_name}-{gpu_num}x{gpu_type}-s{max_seq_len}-b{global_train_batch_size}-{precision}".replace('_', '-')
+    name = f"{project}-{cluster}-{model_name}-{gpu_num}x{gpu_type}-s{max_seq_len}b{global_train_batch_size}{precision}".replace('_', '-')
 
-    name_len_lim = 24
+    name_len_lim = 54 - 7
     if len(name) > name_len_lim:
         _name = name
         name = name[:(name_len_lim + 1)]
-        # print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
+        print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
     parameters = mod_parameters(
         parameters,
@@ -276,7 +281,6 @@ if __name__ == '__main__':
                             for model_yaml in args.model_yamls:
 
                                 run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16)
-
                                 if run:
                                     config = (
                                         args.yaml_base,
