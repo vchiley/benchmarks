@@ -19,8 +19,8 @@ def parse_args():
     parser.add_argument('--project', type=str, default='tput-auto')
     # parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
-    parser.add_argument('-t', '--precisions', '--types', type=str, default=['bf16'], nargs='+', choices=['bf16'])  # ['bf16', 'fp16']
-    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
+    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16'])  # ['bf16', 'fp16']
+    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='FULL')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
     parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
@@ -50,7 +50,7 @@ def parse_args():
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
     parser.add_argument('-g', '--gpu_nums', type=int, default=[1, 8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
 
-    parser.add_argument('--microbatch_size_auto', action='set microbatch_size to auto')
+    parser.add_argument('--microbatch_size_auto', help='set microbatch_size to auto', action='store_true')
 
     parser.add_argument('--RUN', action='store_true')
 
@@ -194,10 +194,14 @@ def run_config(config, args, project, image, RUN):
     # Define our command
     if streaming_data:
         command = """
+        python -c "import torch; print(torch.__version__)"
+        
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
         """
     else:
         command = """
+        python -c "import torch; print(torch.__version__)"
+        
         python benchmarks/llm/convert_c4.py --out_root ./my-copy-c4 --splits val
 
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
