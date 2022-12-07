@@ -170,8 +170,8 @@ def mod_parameters(
 def get_integrations(project, wandb=True):
     integrations = [{
         'integration_type': 'git_repo',
-        'git_repo': 'mosaicml/benchmarks',
-        'git_branch': 'main',
+        'git_repo': 'vchiley/benchmarks',
+        'git_branch': 'llm-thru-bauto',
         'pip_install': '-r llm/requirements.txt'
     }]
     if wandb:
