@@ -19,8 +19,8 @@ def parse_args():
     parser.add_argument('--project', type=str, default='tput-auto')
     # parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
-    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16'])  # ['bf16', 'fp16']
-    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='FULL')
+    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])  # ['bf16', 'fp16']
+    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='PURE')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
     parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
