@@ -145,10 +145,10 @@ def mod_parameters(
     parameters['eval_loader']['dataset']['max_seq_len'] = max_seq_len
 
     parameters['global_train_batch_size'] = global_train_batch_size
+    parameters['device_eval_batch_size'] = global_train_batch_size
     if microbatch_size is not None:
         parameters['device_train_microbatch_size'] = microbatch_size
         parameters['device_eval_microbatch_size'] = microbatch_size
-    parameters['device_eval_batch_size'] = 'auto'
 
     parameters['train_loader']['dataset']['split'] = 'val'  # for throughput testing purposess
     parameters['eval_loader']['eval_subset_num_batches'] = 2  # for throughput testing purposes
