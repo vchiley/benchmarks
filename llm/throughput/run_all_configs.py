@@ -15,26 +15,26 @@ CLUSTER_INFO = {
 def parse_args():    
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
-    parser.add_argument('--project', type=str, default='tput-auto')
+    parser.add_argument('--project', type=str, default='tput1')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
-    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])  # ['bf16', 'fp16']
+    parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
     parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
-                        help='exponent of batch size (in tokens) to be tested (default: [19, 23] = 2^19 to 2^23)')  # 4M
+                        help='exponent of batch size (in tokens) to be tested (default: [19, 23] = 2^19 to 2^23)')
     parser.add_argument('--yaml_base', type=str, default='https://raw.githubusercontent.com/mosaicml/benchmarks/main/llm/yamls/mosaic_gpt/')
     parser.add_argument('-m', '--model_yamls', type=str,
                         default=[
-                            '125m.yaml',
-                            '350m.yaml',
-                            '760m.yaml',
-                            '1b.yaml',
-                            '3b.yaml',
-                            '7b.yaml',
+                            # '125m.yaml',
+                            # '350m.yaml',
+                            # '760m.yaml',
+                            # '1b.yaml',
+                            # '3b.yaml',
+                            # '7b.yaml',
                             '13b.yaml',
-                            '30b.yaml',
-                            '70b.yaml'
+                            # '30b.yaml',
+                            # '70b.yaml'
                         ],
                         choices=['125m.yaml', '350m.yaml', '760m.yaml', '1b.yaml', '3b.yaml', '7b.yaml', '13b.yaml', '30b.yaml', '70b.yaml'],
                         nargs='+', help='model sizes to test')
@@ -212,7 +212,7 @@ def run_config(config, args, project, image, RUN):
     if 'mosaic' in model_name:
         model_name.pop(model_name.index('mosaic'))
     model_name = ''.join(model_name)
-    name = f"{project}-{cluster}-{model_name}-{gpu_num}x{gpu_type}-s{max_seq_len}b{global_train_batch_size}{precision}".replace('_', '-')
+    name = f"{project}-{cluster}-{model_name}-{gpu_num}x{gpu_type}-s{max_seq_len}b{global_train_batch_size}{precision.replace('amp_', '')}".replace('_', '-')
 
     name_len_lim = 54 - 7
     if len(name) > name_len_lim:
