@@ -196,7 +196,6 @@ def main(cfg):
         )],
         # grad_accum=cfg.device_train_grad_accum,
         device_train_microbatch_size=cfg.get('device_train_microbatch_size', 'auto'),
-        device_eval_microbatch_size=cfg.get('device_eval_microbatch_size', 'auto'),
         fsdp_config=fsdp_config,  # type: ignore
         save_folder=cfg.get('save_folder', None),
         save_interval=cfg.get('save_interval', '1000ba'),
