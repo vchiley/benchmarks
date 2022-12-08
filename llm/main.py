@@ -189,6 +189,7 @@ def main(cfg):
         loggers=loggers,
         callbacks=callbacks,
         precision=cfg.precision,
+        grad_clip_norm=cfg.grad_clip_norm,
         # algorithms=[GradientClipping(
         #     clipping_type='norm',
         #     clipping_threshold=cfg.grad_clip_norm
