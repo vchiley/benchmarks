@@ -194,7 +194,8 @@ def main(cfg):
         #     clipping_type='norm',
         #     clipping_threshold=cfg.grad_clip_norm
         # )],
-        grad_accum=cfg.device_train_grad_accum,
+        # grad_accum=cfg.device_train_grad_accum,
+        device_train_microbatch_size=cfg.get('device_train_microbatch_size'),
         fsdp_config=fsdp_config,  # type: ignore
         save_folder=cfg.get('save_folder', None),
         save_interval=cfg.get('save_interval', '1000ba'),

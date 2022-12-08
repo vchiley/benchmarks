@@ -1,7 +1,6 @@
 import argparse
 import requests
 import yaml
-from omegaconf import OmegaConf as om
 
 from mcli.sdk import RunConfig, create_run
 
@@ -17,10 +16,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
     parser.add_argument('--project', type=str, default='tput-auto')
-    # parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.12.1_cu116-python3.9-ubuntu20.04')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
     parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])  # ['bf16', 'fp16']
-    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='PURE')
+    parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
     parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
@@ -50,9 +48,8 @@ def parse_args():
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
     parser.add_argument('-g', '--gpu_nums', type=int, default=[1, 8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
 
-    parser.add_argument('--microbatch_size_auto', help='set microbatch_size to auto', action='store_true')
-
-    parser.add_argument('--disable_wandb', action='store_true')
+    parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
+    parser.add_argument('--wandb', action='store_true')
 
     parser.add_argument('--RUN', action='store_true')
 
@@ -127,8 +124,8 @@ def mod_parameters(
     streaming_data=False,
     max_duration='12ba',
     eval_interval='500ba',
-    microbatch_size=None,  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in torch==1.13)
-    wandb=True,
+    microbatch_size=None,
+    wandb=False,
 ):
     if run_name:
         parameters['run_name'] = run_name
@@ -149,9 +146,9 @@ def mod_parameters(
 
     parameters['global_train_batch_size'] = global_train_batch_size
     if microbatch_size is not None:
-        # TODO: update to 'auto' when composer v12 drops (currently broken) which allow composer to set batch size
         parameters['device_train_microbatch_size'] = microbatch_size
         parameters['device_eval_microbatch_size'] = microbatch_size
+    parameters['device_eval_batch_size'] = 'auto'
 
     parameters['train_loader']['dataset']['split'] = 'val'  # for throughput testing purposess
     parameters['eval_loader']['eval_subset_num_batches'] = 2  # for throughput testing purposes
@@ -169,7 +166,7 @@ def mod_parameters(
     return parameters
 
 
-def get_integrations(project, wandb=True):
+def get_integrations(project, wandb=False):
     integrations = [{
         'integration_type': 'git_repo',
         'git_repo': 'vchiley/benchmarks',
@@ -191,19 +188,15 @@ def run_config(config, args, project, image, RUN):
     yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision, fsdp_config_mixed_precision = config
 
     streaming_data = True if "https" in yaml_base else False
-    integrations = get_integrations(project, wandb=not args.disable_wandb)  # point to git repo and potentially wandb
+    integrations = get_integrations(project, wandb=args.wandb)  # point to git repo and potentially wandb
 
     # Define our command
     if streaming_data:
         command = """
-        python -c "import torch; print(torch.__version__)"
-
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
         """
     else:
         command = """
-        python -c "import torch; print(torch.__version__)"
-
         python benchmarks/llm/convert_c4.py --out_root ./my-copy-c4 --splits val
 
         composer benchmarks/llm/main.py /mnt/config/parameters.yaml
@@ -225,7 +218,7 @@ def run_config(config, args, project, image, RUN):
         name = name[:name_len_lim]
         print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
-    microbatch_size = "auto" if args.microbatch_size_auto else None
+    microbatch_size = args.microbatch_size
     parameters = mod_parameters(
         parameters,
         max_seq_len,
@@ -235,7 +228,7 @@ def run_config(config, args, project, image, RUN):
         run_name=name,
         streaming_data=streaming_data,
         microbatch_size=microbatch_size,
-        wandb=not args.disable_wandb)
+        wandb=args.wandb)
 
     # Create run config mcli sdk/api
     config = RunConfig(
@@ -249,10 +242,8 @@ def run_config(config, args, project, image, RUN):
         image=image,
         optimization_level=0,
         integrations=integrations,
-        # env_variables=<factory>,
         command=command,
         parameters=parameters,
-        # entrypoint='',
     )
 
     if RUN:
