@@ -88,8 +88,6 @@ def parse_run(run):
     gpu_num = run.config.gpu_num
     gpu_type = run.config.gpu_type
 
-    import ipdb; ipdb.set_trace()
-
     precision = run.config.parameters['precision']
     mp_mode = run.config.parameters['fsdp_config']['mixed_precision']
     seq_len = run.config.parameters['max_seq_len']
@@ -100,17 +98,19 @@ def parse_run(run):
     for line in logs:
         lines += line.split('\n')
 
-    for line in lines[-25:]:
-        if "trainer/grad_accum" in line:
-            grad_accum = int(line.split(' ')[-1])
-            break
-
     for line in lines:
         if f"n_params: " in line[:len(f"n_params: ")]:
             n_params = int(line.split(' ')[-1])
             break
 
-    for line in lines[-25:]:
+    lines.reverse()
+
+    for line in lines:
+        if "trainer/device_train_microbatch_size" in line:
+            micro_batchsize = int(line.split(' ')[-1])
+            break
+
+    for line in lines:
         if "throughput/samples_per_sec" in line:
             throughput = float(line.split(' ')[-1])
             break
@@ -120,7 +120,7 @@ def parse_run(run):
     n_layers = run.config.parameters['model']['n_layers']
 
     global_batchsize_tokens = global_train_batch_size * seq_len
-    micro_batchsize = global_train_batch_size // gpu_num // grad_accum
+    grad_accum = global_train_batch_size // gpu_num // micro_batchsize
 
     # mfu is approximated using thoughtput and param count
     # the number of paramters is approximately the number of multiply-accumulates (MAC) in the network

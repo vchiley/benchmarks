@@ -46,10 +46,11 @@ def parse_args():
     parser.add_argument('--gpu_types', type=str, default=['a100_80gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
-    parser.add_argument('-g', '--gpu_nums', type=int, default=[1, 8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
+    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
 
     parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
-    parser.add_argument('--wandb', action='store_true')
+
+    parser.add_argument('--disable_wandb', action='store_true')
 
     parser.add_argument('--RUN', action='store_true')
 
@@ -125,7 +126,7 @@ def mod_parameters(
     max_duration='12ba',
     eval_interval='500ba',
     microbatch_size=None,
-    wandb=False,
+    wandb=True,
 ):
     if run_name:
         parameters['run_name'] = run_name
@@ -167,7 +168,7 @@ def mod_parameters(
     return parameters
 
 
-def get_integrations(project, wandb=False):
+def get_integrations(project, wandb=True):
     integrations = [{
         'integration_type': 'git_repo',
         'git_repo': 'vchiley/benchmarks',
@@ -189,7 +190,7 @@ def run_config(config, args, project, image, RUN):
     yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision, fsdp_config_mixed_precision = config
 
     streaming_data = True if "https" in yaml_base else False
-    integrations = get_integrations(project, wandb=args.wandb)  # point to git repo and potentially wandb
+    integrations = get_integrations(project, wandb=not args.disable_wandb)  # point to git repo and potentially wandb
 
     # Define our command
     if streaming_data:
@@ -229,7 +230,7 @@ def run_config(config, args, project, image, RUN):
         run_name=name,
         streaming_data=streaming_data,
         microbatch_size=microbatch_size,
-        wandb=args.wandb)
+        wandb=not args.disable_wandb)
 
     # Create run config mcli sdk/api
     config = RunConfig(
