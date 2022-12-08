@@ -148,6 +148,9 @@ def mod_parameters(
     if microbatch_size is not None:
         parameters['device_train_microbatch_size'] = microbatch_size
 
+    # update eval batch size based on change in seq len
+    parameters['device_eval_batch_size'] = max(1, int(parameters['device_eval_batch_size'] / ((max_seq_len / 2048) ** 2)))
+
     parameters['train_loader']['dataset']['split'] = 'val'  # for throughput testing purposess
     parameters['eval_loader']['eval_subset_num_batches'] = 2  # for throughput testing purposes
 
