@@ -52,6 +52,8 @@ def parse_args():
 
     parser.add_argument('--microbatch_size_auto', help='set microbatch_size to auto', action='store_true')
 
+    parser.add_argument('--disable_wandb', action='store_true')
+
     parser.add_argument('--RUN', action='store_true')
 
     return parser.parse_args()
@@ -125,8 +127,8 @@ def mod_parameters(
     streaming_data=False,
     max_duration='12ba',
     eval_interval='500ba',
+    microbatch_size=None,  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in torch==1.13)
     wandb=True,
-    microbatch_size=None  # TODO: update to 'auto' when composer v12 drops (torch has known bug which will be fixed in torch==1.13)
 ):
     if run_name:
         parameters['run_name'] = run_name
@@ -189,7 +191,7 @@ def run_config(config, args, project, image, RUN):
     yaml_base, model_yaml, max_seq_len, global_train_batch_size, cluster, gpu_type, gpu_num, precision, fsdp_config_mixed_precision = config
 
     streaming_data = True if "https" in yaml_base else False
-    integrations = get_integrations(project)  # point to git repo and potentially wandb
+    integrations = get_integrations(project, wandb=not args.disable_wandb)  # point to git repo and potentially wandb
 
     # Define our command
     if streaming_data:
@@ -232,7 +234,8 @@ def run_config(config, args, project, image, RUN):
         fsdp_config_mixed_precision=fsdp_config_mixed_precision,
         run_name=name,
         streaming_data=streaming_data,
-        microbatch_size=microbatch_size)
+        microbatch_size=microbatch_size,
+        wandb=not args.disable_wandb)
 
     # Create run config mcli sdk/api
     config = RunConfig(

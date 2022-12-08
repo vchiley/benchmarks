@@ -139,6 +139,8 @@ def main(cfg):
     fsdp_config = om.to_container(fsdp_config,
                                   resolve=True) if fsdp_config else None
 
+    print(fsdp_config)
+
     # Build Model
     # For fast initialization of MosaicGPT, use cfg.model.device='meta'
     print('Initializing model...')

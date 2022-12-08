@@ -88,25 +88,18 @@ def parse_run(run):
     gpu_num = run.config.gpu_num
     gpu_type = run.config.gpu_type
 
+    import ipdb; ipdb.set_trace()
+
     precision = run.config.parameters['precision']
+    mp_mode = run.config.parameters['fsdp_config']['mixed_precision']
     seq_len = run.config.parameters['max_seq_len']
     global_train_batch_size = run.config.parameters['global_train_batch_size']
-
-
-    # with MAPIConnection.get_current_connection():
-    #     logs = msdk.get_run_logs(run)
-    #     lines = []
-    #     for line in logs:
-    #         lines += line.split('\n')
 
     logs = msdk.get_run_logs(run)
     lines = []
     for line in logs:
         lines += line.split('\n')
 
-    # MAPIConnection.get_current_connection().close()
-
-    
     for line in lines[-25:]:
         if "trainer/grad_accum" in line:
             grad_accum = int(line.split(' ')[-1])
@@ -145,7 +138,7 @@ def parse_run(run):
     mfu_w_recomp = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
     mfu_w_attn_w_recomp = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
 
-    print(f"| {model_name: >7} | {n_params: >11} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} | {seq_len: >6} | {global_batchsize_tokens: >19} | {global_train_batch_size: >19} | {micro_batchsize: >14} | {grad_accum: >9} | {precision: >9} | {throughput: >10.4f} | {mfu:.4f} | {mfu_w_attn:.4f} | {mfu_w_recomp:.4f} | {mfu_w_attn_w_recomp:.4f} |")
+    print(f"| {model_name: >7} | {n_params: >11} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} | {seq_len: >6} | {global_batchsize_tokens: >19} | {global_train_batch_size: >19} | {micro_batchsize: >14} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {throughput: >10.4f} | {mfu:.4f} | {mfu_w_attn:.4f} | {mfu_w_recomp:.4f} | {mfu_w_attn_w_recomp:.4f} |")
 
 
 def main(args):
@@ -153,8 +146,8 @@ def main(args):
     runs = filter_runs(runs)
 
     print(
-        "| Model   | ParamCount  | Cluster | NumGPUs | GPUType   | SeqLen | GlobalBatchSize (T) | GlobalBatchSize (S) | MicroBatchSize | GradAccum | Precision | Throughput | MFU**  | MFU    | HFU**  | HFU    |\n"
-        "| ------- | ----------- | ------- | ------- | --------- | ------ | ------------------- | ------------------- | -------------- | --------- | --------- | ---------- | ------ | ------ | ------ | ------ |"
+        "| Model   | ParamCount  | Cluster | NumGPUs | GPUType   | SeqLen | GlobalBatchSize (T) | GlobalBatchSize (S) | MicroBatchSize | GradAccum | Precision | MP Mode | Throughput | MFU**  | MFU    | HFU**  | HFU    |\n"
+        "| ------- | ----------- | ------- | ------- | --------- | ------ | ------------------- | ------------------- | -------------- | --------- | --------- | ------- |----------- | ------ | ------ | ------ | ------ |"
     )
     for run in runs:
         parse_run(run)
