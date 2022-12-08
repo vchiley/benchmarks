@@ -5,7 +5,6 @@ import os
 import sys
 import warnings
 
-import torch
 from composer import Trainer
 from composer.algorithms import GradientClipping
 from composer.callbacks import LRMonitor, MemoryMonitor, SpeedMonitor
