@@ -155,7 +155,9 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
-
+    main(args)
+    
+    # TODO: mcli.sdk has a bug; remove everything below when bug is fixed
     from mcli.api.engine.engine import MAPIConnection
-    with MAPIConnection.get_current_connection():  # TODO: mcli.sdk has a bug; remove when bug is fixed
-        main(args)
+    MAPIConnection.get_current_connection().close()
+
