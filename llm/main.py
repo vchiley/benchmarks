@@ -5,6 +5,7 @@ import os
 import sys
 import warnings
 
+import torch
 from composer import Trainer
 from composer.algorithms import GradientClipping
 from composer.callbacks import LRMonitor, MemoryMonitor, SpeedMonitor
@@ -139,6 +140,32 @@ def main(cfg):
     fsdp_config = om.to_container(fsdp_config,
                                   resolve=True) if fsdp_config else None
 
+    dtype = torch.bfloat16 if cfg.precision == 'amp_bf16' else torch.float16 if cfg.precision == 'amp_fp16' else torch.float32
+    print(dtype)
+    if isinstance(fsdp_config['mixed_precision'], str):
+        mixed_precision = fsdp_config['mixed_precision'].upper()
+        fsdp_config['mixed_precision'] = {
+            'param_dtype': None,
+            'reduce_dtype': None,
+            'buffer_dtype': None,
+        }
+        if mixed_precision == 'FULL':
+            # param_dtype = torch.float32
+            # reduce_dtype = torch.float32
+            # buffer_dtype = torch.float32
+            pass
+        elif mixed_precision == 'DEFAULT':
+            # param_dtype = torch.float32
+            # reduce_dtype = get_torch_dtype(precision)
+            # buffer_dtype = torch.float32
+            fsdp_config['mixed_precision']['reduce_dtype'] = dtype
+        elif mixed_precision == 'PURE':
+            # param_dtype = get_torch_dtype(precision)
+            # reduce_dtype = get_torch_dtype(precision)
+            # buffer_dtype = get_torch_dtype(precision)
+            fsdp_config['mixed_precision']['param_dtype'] = dtype
+            fsdp_config['mixed_precision']['reduce_dtype'] = dtype
+            fsdp_config['mixed_precision']['buffer_dtype'] = dtype
     print(fsdp_config)
 
     # Build Model
