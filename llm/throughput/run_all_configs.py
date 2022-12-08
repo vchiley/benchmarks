@@ -222,7 +222,7 @@ def run_config(config, args, project, image, RUN):
     name_len_lim = 54 - 7
     if len(name) > name_len_lim:
         _name = name
-        name = name[:(name_len_lim + 1)]
+        name = name[:name_len_lim]
         print(f'Shortening {_name} to {name} ({name_len_lim} chars)')
 
     microbatch_size = "auto" if args.microbatch_size_auto else None
