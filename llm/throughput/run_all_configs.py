@@ -15,7 +15,7 @@ CLUSTER_INFO = {
 def parse_args():    
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
-    parser.add_argument('--project', type=str, default='tput1')
+    parser.add_argument('--project', type=str, default='tput')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
     parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
@@ -27,14 +27,14 @@ def parse_args():
     parser.add_argument('-m', '--model_yamls', type=str,
                         default=[
                             '125m.yaml',
-                            # '350m.yaml',
-                            # '760m.yaml',
-                            # '1b.yaml',
-                            # '3b.yaml',
-                            # '7b.yaml',
-                            # '13b.yaml',
-                            # '30b.yaml',
-                            # '70b.yaml'
+                            '350m.yaml',
+                            '760m.yaml',
+                            '1b.yaml',
+                            '3b.yaml',
+                            '7b.yaml',
+                            '13b.yaml',
+                            '30b.yaml',
+                            '70b.yaml'
                         ],
                         choices=['125m.yaml', '350m.yaml', '760m.yaml', '1b.yaml', '3b.yaml', '7b.yaml', '13b.yaml', '30b.yaml', '70b.yaml'],
                         nargs='+', help='model sizes to test')
@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--gpu_types', type=str, default=['a100_80gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
-    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64], nargs='+', choices=_gpu_nums)
+    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
 
     parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
 
@@ -287,7 +287,7 @@ if __name__ == '__main__':
                         for precision in args.precisions:
                             for model_yaml in args.model_yamls:
 
-                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=8)
+                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16)
                                 if run:
                                     config = (
                                         args.yaml_base,
