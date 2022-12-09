@@ -35,6 +35,7 @@ def get_runs(args):
 
     def sort_key(r):
         model_name = [s for s in r.name.split('-') if 'gpt' in s][0]
+        num_gpu = r.config.gpu_num
         if model_name[-1] == 'm':
             model_name_size = 1e6
         elif model_name[-1] == 'b':
@@ -43,7 +44,7 @@ def get_runs(args):
             print(model_name)
             raise ValueError
         model_size = int(model_name[3:-1])
-        return (model_name_size, model_size, r.config.parameters['max_seq_len'], r.config.parameters['global_train_batch_size'])
+        return (model_name_size, model_size, r.config.parameters['max_seq_len'], num_gpu, r.config.parameters['global_train_batch_size'])
     runs.sort(reverse=True, key=sort_key)
     
     return runs
@@ -53,7 +54,7 @@ def filter_runs(runs):
     pop_runs = []
     for run in runs:
         if run.status == msdk.RunStatus('FAILED'):
-            print(f"run {run.name} has FAILED (likely due to OOM error)")
+            print(f"run {run.name} has FAILED (likely due to OOM error but we'd recommend checking.)")
             pop_runs.append(run)
         
     for run in pop_runs:
@@ -94,9 +95,10 @@ def parse_run(run):
     global_train_batch_size = run.config.parameters['global_train_batch_size']
 
     logs = msdk.get_run_logs(run)
-    lines = []
+    lines = ''
     for line in logs:
-        lines += line.split('\n')
+        lines += line
+    lines = lines.split('\n')
 
     for line in lines:
         if f"n_params: " in line[:len(f"n_params: ")]:
@@ -122,6 +124,9 @@ def parse_run(run):
     global_batchsize_tokens = global_train_batch_size * seq_len
     grad_accum = global_train_batch_size // gpu_num // micro_batchsize
 
+    throughput_t = throughput * seq_len
+    throughput_t_gpu = throughput_t / gpu_num
+
     # mfu is approximated using thoughtput and param count
     # the number of paramters is approximately the number of multiply-accumulates (MAC) in the network
     # each MAC has 2 FLOPs - we multiply by 2 ie 2 * n_param
@@ -135,10 +140,10 @@ def parse_run(run):
     attn_flops_per_seq = n_layers * 2 * (d_model * (seq_len**2))
     mfu_w_attn = (3 * flops_per_seq + 2 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
 
-    mfu_w_recomp = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
-    mfu_w_attn_w_recomp = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+    hfu = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+    hfu_w_attn = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
 
-    print(f"| {model_name: >7} | {n_params: >11} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} | {seq_len: >6} | {global_batchsize_tokens: >19} | {global_train_batch_size: >19} | {micro_batchsize: >14} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {throughput: >10.4f} | {mfu:.4f} | {mfu_w_attn:.4f} | {mfu_w_recomp:.4f} | {mfu_w_attn_w_recomp:.4f} |")
+    print(f"| {model_name: >7} | {seq_len: >6} | {global_batchsize_tokens: >19} | {gpu_num: >3}x{gpu_type.upper()} | {throughput_t: >16.2f} | {mfu:.4f} | {mfu_w_attn:.4f} | {hfu:.4f} | {hfu_w_attn:.4f} | {throughput_t_gpu: >23.4f} | {throughput: >16.4f} | {n_params: >11} | {global_train_batch_size: >19} | {micro_batchsize: >14} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} |")
 
 
 def main(args):
@@ -146,11 +151,15 @@ def main(args):
     runs = filter_runs(runs)
 
     print(
-        "| Model   | ParamCount  | Cluster | NumGPUs | GPUType   | SeqLen | GlobalBatchSize (T) | GlobalBatchSize (S) | MicroBatchSize | GradAccum | Precision | MP Mode | Throughput | MFU**  | MFU    | HFU**  | HFU    |\n"
-        "| ------- | ----------- | ------- | ------- | --------- | ------ | ------------------- | ------------------- | -------------- | --------- | --------- | ------- |----------- | ------ | ------ | ------ | ------ |"
+        "| Model   | SeqLen | GlobalBatchSize (T) | GPUType       | Throughput (T/s) | MFU**  | MFU    | HFU**  | HFU    | GPUThroughput (T/s/GPU) | Throughput (S/s) | ParamCount  | GlobalBatchSize (S) | MicroBatchSize | GradAccum | Precision | MP Mode | Cluster | NumGPUs | GPUType   |\n"
+        "| ------- | ------ | ------------------- | ------------- | ---------------- | ------ | ------ | ------ | ------ | ----------------------- | ---------------- | ----------- | ------------------- | -------------- | --------- | --------- | ------- | ------- | ------- | --------- |"
     )
     for run in runs:
-        parse_run(run)
+        try:
+            parse_run(run)
+        except Exception as e:
+            print(f'{run.name=} not parsed')
+            print(e)
 
 
 if __name__ == "__main__":

@@ -26,13 +26,13 @@ def parse_args():
     parser.add_argument('--yaml_base', type=str, default='https://raw.githubusercontent.com/mosaicml/benchmarks/main/llm/yamls/mosaic_gpt/')
     parser.add_argument('-m', '--model_yamls', type=str,
                         default=[
-                            # '125m.yaml',
+                            '125m.yaml',
                             # '350m.yaml',
                             # '760m.yaml',
                             # '1b.yaml',
                             # '3b.yaml',
                             # '7b.yaml',
-                            '13b.yaml',
+                            # '13b.yaml',
                             # '30b.yaml',
                             # '70b.yaml'
                         ],
@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--gpu_types', type=str, default=['a100_80gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
-    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
+    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64], nargs='+', choices=_gpu_nums)
 
     parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
 
@@ -252,6 +252,8 @@ def run_config(config, args, project, image, RUN):
         # Create the run from a config
         run = create_run(config)
         print(f'Launching run {run.name}')
+    else:
+        print(f'run = {name}')
 
 
 def run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16):
@@ -285,7 +287,7 @@ if __name__ == '__main__':
                         for precision in args.precisions:
                             for model_yaml in args.model_yamls:
 
-                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16)
+                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=8)
                                 if run:
                                     config = (
                                         args.yaml_base,
