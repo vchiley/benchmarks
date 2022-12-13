@@ -150,7 +150,7 @@ def parse_run(run):
         hfu = mfu
         hfu_w_attn = mfu_w_attn
 
-    print(f"| {model_name: >7} | {seq_len: >10} | {global_batchsize_tokens: >19} | {gpu_num: >3}x{gpu_type.upper()} | {throughput_t: >16.2f} | {mfu:.4f} | {mfu_w_attn:.4f} | {hfu:.4f} | {hfu_w_attn:.4f} | {throughput_t_gpu: >23.4f} | {throughput: >16.4f} | {n_params: >11} | {sharding_strategy: >13} | {str(a_ckpt): >7} | {str(a_cpu_offload): >13} | {global_train_batch_size: >19} | {micro_batchsize: >18} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} |")
+    print(f"| {model_name: >7} | {seq_len: >10} | {gpu_num: >3}x{gpu_type.upper()} | {mfu:.4f} | {mfu_w_attn:.4f} | {hfu:.4f} | {hfu_w_attn:.4f} | {throughput_t: >16.2f} | {throughput_t_gpu: >23.4f} | {throughput: >16.4f} | {n_params: >11} | {global_batchsize_tokens: >19} | {global_train_batch_size: >19} | {micro_batchsize: >18} | {grad_accum: >9} | {sharding_strategy: >13} | {str(a_ckpt): >7} | {str(a_cpu_offload): >13} | {precision: >9} | {mp_mode: >7} | {gpu_num: >7} | {gpu_type: >7} | {cluster: >7} |")
 
 
 def main(args):
@@ -158,8 +158,8 @@ def main(args):
     runs = filter_runs(runs)
 
     print(
-        "| Model   | SeqLen (T) | GlobalBatchSize (T) | GPUType       | Throughput (T/s) | MFU*   | MFU    | HFU*   | HFU    | GPUThroughput (T/s/GPU) | Throughput (S/s) | ParamCount  | ShardStrategy | ActCkpt | ActCPUoffload | GlobalBatchSize (S) | MicroBatchSize (S) | GradAccum | Precision | MP Mode | Cluster | NumGPUs | GPUType   |\n"
-        "| ------- | ---------- | ------------------- | ------------- | ---------------- | ------ | ------ | ------ | ------ | ----------------------- | ---------------- | ----------- | ------------- | ------- | ------------- | ------------------- | ------------------ | --------- | --------- | ------- | ------- | ------- | --------- |"
+        "| Model   | SeqLen (T) | GPUType       | MFU*   | MFU    | HFU*   | HFU    | Throughput (T/s) | GPUThroughput (T/s/GPU) | Throughput (S/s) | ParamCount  | GlobalBatchSize (T) | GlobalBatchSize (S) | MicroBatchSize (S) | GradAccum | ShardStrategy | ActCkpt | ActCPUoffload | Precision | MP Mode | NumGPUs | GPUType   | Cluster |\n"
+        "| ------- | ---------- | ------------- | ------ | ------ | ------ | ------ | ---------------- | ----------------------- | ---------------- | ----------- | ------------------- | ------------------- | ------------------ | --------- | ------------- | ------- | ------------- | --------- | ------- | ------- | --------- | ------- |"
     )
     for run in runs:
         try:
