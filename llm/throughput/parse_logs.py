@@ -91,6 +91,9 @@ def parse_run(run):
 
     precision = run.config.parameters['precision']
     mp_mode = run.config.parameters['fsdp_config']['mixed_precision']
+    sharding_strategy = run.config.parameters['fsdp_config']['sharding_strategy']
+    a_ckpt = run.config.parameters['fsdp_config']['activation_checkpointing']
+    a_cpu_offload = run.config.parameters['fsdp_config']['activation_cpu_offload']
     seq_len = run.config.parameters['max_seq_len']
     global_train_batch_size = run.config.parameters['global_train_batch_size']
 
@@ -140,10 +143,14 @@ def parse_run(run):
     attn_flops_per_seq = n_layers * 2 * (d_model * (seq_len**2))
     mfu_w_attn = (3 * flops_per_seq + 2 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
 
-    hfu = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
-    hfu_w_attn = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+    if a_ckpt:
+        hfu = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+        hfu_w_attn = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+    else:
+        hfu = mfu
+        hfu_w_attn = mfu_w_attn
 
-    print(f"| {model_name: >7} | {seq_len: >10} | {global_batchsize_tokens: >19} | {gpu_num: >3}x{gpu_type.upper()} | {throughput_t: >16.2f} | {mfu:.4f} | {mfu_w_attn:.4f} | {hfu:.4f} | {hfu_w_attn:.4f} | {throughput_t_gpu: >23.4f} | {throughput: >16.4f} | {n_params: >11} | {global_train_batch_size: >19} | {micro_batchsize: >18} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} |")
+    print(f"| {model_name: >7} | {seq_len: >10} | {global_batchsize_tokens: >19} | {gpu_num: >3}x{gpu_type.upper()} | {throughput_t: >16.2f} | {mfu:.4f} | {mfu_w_attn:.4f} | {hfu:.4f} | {hfu_w_attn:.4f} | {throughput_t_gpu: >23.4f} | {throughput: >16.4f} | {n_params: >11} | {sharding_strategy: >13} | {str(a_ckpt): >7} | {str(a_cpu_offload): >13} | {global_train_batch_size: >19} | {micro_batchsize: >18} | {grad_accum: >9} | {precision: >9} | {mp_mode: >7} | {cluster: >7} | {gpu_num: >7} | {gpu_type: >7} |")
 
 
 def main(args):
@@ -151,8 +158,8 @@ def main(args):
     runs = filter_runs(runs)
 
     print(
-        "| Model   | SeqLen (T) | GlobalBatchSize (T) | GPUType       | Throughput (T/s) | MFU*   | MFU    | HFU*   | HFU    | GPUThroughput (T/s/GPU) | Throughput (S/s) | ParamCount  | GlobalBatchSize (S) | MicroBatchSize (S) | GradAccum | Precision | MP Mode | Cluster | NumGPUs | GPUType   |\n"
-        "| ------- | ---------- | ------------------- | ------------- | ---------------- | ------ | ------ | ------ | ------ | ----------------------- | ---------------- | ----------- | ------------------- | ------------------ | --------- | --------- | ------- | ------- | ------- | --------- |"
+        "| Model   | SeqLen (T) | GlobalBatchSize (T) | GPUType       | Throughput (T/s) | MFU*   | MFU    | HFU*   | HFU    | GPUThroughput (T/s/GPU) | Throughput (S/s) | ParamCount  | ShardStrategy | ActCkpt | ActCPUoffload | GlobalBatchSize (S) | MicroBatchSize (S) | GradAccum | Precision | MP Mode | Cluster | NumGPUs | GPUType   |\n"
+        "| ------- | ---------- | ------------------- | ------------- | ---------------- | ------ | ------ | ------ | ------ | ----------------------- | ---------------- | ----------- | ------------- | ------- | ------------- | ------------------- | ------------------ | --------- | --------- | ------- | ------- | ------- | --------- |"
     )
     for run in runs:
         try:
