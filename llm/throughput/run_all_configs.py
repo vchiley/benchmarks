@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
     parser.add_argument('-s', '--seq_len_exp', type=int, default=[9, 14], nargs=2,
                         help='exponent of seq lengths to be tested (default: [9, 14] = 2^9 to 2^13)')
-    parser.add_argument('-b', '--batch_size_exp', type=int, default=[19, 23], nargs=2,
+    parser.add_argument('-b', '--batch_size_exp', type=int, default=[23, 23], nargs=2,
                         help='exponent of batch size (in tokens) to be tested (default: [19, 23] = 2^19 to 2^23)')
     parser.add_argument('--yaml_base', type=str, default='https://raw.githubusercontent.com/mosaicml/benchmarks/main/llm/yamls/mosaic_gpt/')
     parser.add_argument('-m', '--model_yamls', type=str,
@@ -40,13 +40,13 @@ def parse_args():
                         nargs='+', help='model sizes to test')
 
     # NOTE: based on mosaic internal use clusters 
-    parser.add_argument('-c', '--clusters', type=str, default=['r1z1'], nargs='+', choices=['r1z1', 'r7z2'])
+    parser.add_argument('-c', '--clusters', type=str, default=['r7z2'], nargs='+', choices=['r1z1', 'r7z2'])
     known_args = parser.parse_known_args()[0]
     _gpu_types = get_gpu_types(known_args.clusters)
-    parser.add_argument('--gpu_types', type=str, default=['a100_80gb'], nargs='+', choices=_gpu_types)
+    parser.add_argument('--gpu_types', type=str, default=['a100_40gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
-    parser.add_argument('-g', '--gpu_nums', type=int, default=[8, 16, 32, 64, 128], nargs='+', choices=_gpu_nums)
+    parser.add_argument('-g', '--gpu_nums', type=int, default=[16, 32, 64], nargs='+', choices=_gpu_nums)
 
     parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
 
@@ -287,7 +287,7 @@ if __name__ == '__main__':
                         for precision in args.precisions:
                             for model_yaml in args.model_yamls:
 
-                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=16)
+                                run = run_check_capacity(model_yaml, gpu_num, gpu_type, p_multiplier=4)
                                 if run:
                                     config = (
                                         args.yaml_base,
