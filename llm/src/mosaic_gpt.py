@@ -145,10 +145,16 @@ class MosaicGPT(nn.Module):
         super().__init__()
         assert cfg.name == 'mosaic_gpt', f'Tried to build MosaicGPT model with cfg.name={cfg.name}'
         self.cfg = cfg
+
+        emb_device = cfg.get('emb_device', None)
+        if cfg.device == 'meta':
+            emb_device = cfg.device
+            print(f'Warning: emb_device will default to {cfg.device=}; weight tying will be broken when using FSDP.')
+
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(cfg.vocab_size, cfg.d_model,
-                                 device=cfg.device),
+                                 device=emb_device),
                 wpe=nn.Embedding(cfg.max_seq_len,
                                  cfg.d_model,
                                  device=cfg.device),
@@ -162,7 +168,7 @@ class MosaicGPT(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model,
                                  cfg.vocab_size,
                                  bias=False,
-                                 device=cfg.device)
+                                 device=emb_device)
 
         # Apply weight tying
         # Ensures that wte and lm_head are in the same FSDP block
