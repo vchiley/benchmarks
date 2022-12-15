@@ -147,9 +147,10 @@ class MosaicGPT(nn.Module):
         self.cfg = cfg
 
         emb_device = cfg.get('emb_device', None)
-        if cfg.device == 'meta':
+        if emb_device is None:
             emb_device = cfg.device
-            print(f'Warning: emb_device will default to {cfg.device=}; weight tying will be broken when using FSDP.')
+            if emb_device == 'meta':
+                print(f'Warning: emb_device will default to {cfg.device=}; weight tying will be broken when using FSDP.')
 
         self.transformer = nn.ModuleDict(
             dict(
