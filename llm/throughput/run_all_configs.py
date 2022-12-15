@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--yaml_base', type=str, default='https://raw.githubusercontent.com/mosaicml/benchmarks/main/llm/yamls/mosaic_gpt/')
     parser.add_argument('-m', '--model_yamls', type=str,
                         default=[
-                            '125m.yaml',
+                            # '125m.yaml',
                             '350m.yaml',
                             '760m.yaml',
                             '1b.yaml',

@@ -72,7 +72,7 @@ class FlashCausalAttention(nn.Module):
     def __init__(self, cfg: DictConfig, device: Optional[str] = None):
         super().__init__()
         try:
-            from flash_attn.flash_attention import FlashMHA
+            from flash_attn.flash_attention import FlashMHA  # type: ignore
         except ImportError as e:
             raise e
 
@@ -160,19 +160,6 @@ class MosaicGPT(nn.Module):
                 ]),
                 ln_f=nn.LayerNorm(cfg.d_model, device=cfg.device),
             ))
-        self.lm_head = nn.Linear(cfg.d_model,
-                                 cfg.vocab_size,
-                                 bias=False,
-                                 device=cfg.device)
-
-        # Apply weight tying
-        # Ensures that wte and lm_head are in the same FSDP block
-        self.transformer._fsdp_wrap = False  # type: ignore
-        self.transformer.wte._fsdp_wrap = False  # type: ignore
-        self.lm_head._fsdp_wrap = False  # type: ignore
-        self.lm_head.weight = self.transformer.wte.weight  # type: ignore
-        if cfg.device == 'meta':
-            warnings.warn(f'device={cfg.device} embedding weight tying will be broken by FSDP')
 
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
@@ -193,7 +180,8 @@ class MosaicGPT(nn.Module):
         for block in self.transformer.blocks:  # type: ignore
             x = block(x, key_padding_mask)
         x = self.transformer.ln_f(x)  # type: ignore
-        logits = self.lm_head(x)
+        # output embedding weight tied to input embedding
+        logits = F.linear(x, self.transformer.wte.weight, None)
         return logits
 
     # Param Initialization, needed for device='meta' fast initialization
