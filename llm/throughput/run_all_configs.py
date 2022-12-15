@@ -15,7 +15,7 @@ CLUSTER_INFO = {
 def parse_args():    
     parser = argparse.ArgumentParser(description='Generate and run configurations to test MosaicGPT training throughput.')
 
-    parser.add_argument('--project', type=str, default='tput')
+    parser.add_argument('--project', type=str, default='tp7z2')
     parser.add_argument('--image', type=str, default='mosaicml/pytorch:1.13.0_cu117-python3.10-ubuntu20.04')
     parser.add_argument('-t', '--precisions', '--types', type=str, default=['amp_bf16'], nargs='+', choices=['amp_bf16', 'amp_fp16'])
     parser.add_argument('--fsdp_config_mixed_precision', type=str, default='DEFAULT')
@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--gpu_types', type=str, default=['a100_40gb'], nargs='+', choices=_gpu_types)
     known_args = parser.parse_known_args()[0]
     _gpu_nums = get_gpu_nums(known_args.clusters, known_args.gpu_types)
-    parser.add_argument('-g', '--gpu_nums', type=int, default=[16, 32, 64], nargs='+', choices=_gpu_nums)
+    parser.add_argument('-g', '--gpu_nums', type=int, default=[16], nargs='+', choices=_gpu_nums)
 
     parser.add_argument('--microbatch_size', type=int, default=None, help='set microbatch_size')
 
@@ -250,7 +250,7 @@ def run_config(config, args, project, image, RUN):
 
     if RUN:
         # Create the run from a config
-        run = create_run(config)
+        run = create_run(config)  # , _priority='low'
         print(f'Launching run {run.name}')
     else:
         print(f'run = {name}')
