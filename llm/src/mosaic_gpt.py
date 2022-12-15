@@ -7,6 +7,7 @@ Inspired by https://github.com/karpathy/minGPT/blob/master/mingpt/model.py
 """
 
 import math
+import warnings
 from functools import partial
 from typing import Optional
 
@@ -145,17 +146,10 @@ class MosaicGPT(nn.Module):
         super().__init__()
         assert cfg.name == 'mosaic_gpt', f'Tried to build MosaicGPT model with cfg.name={cfg.name}'
         self.cfg = cfg
-
-        emb_device = cfg.get('emb_device', None)
-        if emb_device is None:
-            emb_device = cfg.device
-            if emb_device == 'meta':
-                print(f'Warning: emb_device will default to {cfg.device=}; weight tying will be broken when using FSDP.')
-
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(cfg.vocab_size, cfg.d_model,
-                                 device=emb_device),
+                                 device=cfg.device),
                 wpe=nn.Embedding(cfg.max_seq_len,
                                  cfg.d_model,
                                  device=cfg.device),
@@ -169,7 +163,7 @@ class MosaicGPT(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model,
                                  cfg.vocab_size,
                                  bias=False,
-                                 device=emb_device)
+                                 device=cfg.device)
 
         # Apply weight tying
         # Ensures that wte and lm_head are in the same FSDP block
@@ -177,6 +171,8 @@ class MosaicGPT(nn.Module):
         self.transformer.wte._fsdp_wrap = False  # type: ignore
         self.lm_head._fsdp_wrap = False  # type: ignore
         self.lm_head.weight = self.transformer.wte.weight  # type: ignore
+        if cfg.device == 'meta':
+            warnings.warn(f'device={cfg.device} embedding weight tying will be broken by FSDP')
 
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
