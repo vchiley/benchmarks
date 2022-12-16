@@ -160,23 +160,6 @@ class MosaicGPT(nn.Module):
                 ]),
                 ln_f=nn.LayerNorm(cfg.d_model, device=cfg.device),
             ))
-<<<<<<< HEAD
-        self.lm_head = nn.Linear(cfg.d_model,
-                                 cfg.vocab_size,
-                                 bias=False,
-                                 device=cfg.device)
-
-        # Apply weight tying
-        # Ensures that wte and lm_head are in the same FSDP block
-        self.transformer._fsdp_wrap = False  # type: ignore
-        self.transformer.wte._fsdp_wrap = False  # type: ignore
-        self.lm_head._fsdp_wrap = False  # type: ignore
-        self.lm_head.weight = self.transformer.wte.weight  # type: ignore
-        if cfg.device == 'meta':
-            # TODO: remove warning when fixed
-            warnings.warn(f'device={cfg.device} embedding weight tying will be broken by FSDP')
-=======
->>>>>>> wtie
 
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
