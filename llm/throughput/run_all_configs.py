@@ -9,6 +9,7 @@ CLUSTER_INFO = {
     # Cluster: [(gpu_type, max_gpus_per_run)],
     'r1z1': [('a100_80gb',   8),],
     'r7z2': [('a100_40gb', 128),],
+    'stab1': [('a100_80gb',   344),],
 }
 
 
@@ -40,7 +41,7 @@ def parse_args():
                         nargs='+', help='model sizes to test')
 
     # NOTE: based on mosaic internal use clusters 
-    parser.add_argument('-c', '--clusters', type=str, default=['r7z2'], nargs='+', choices=['r1z1', 'r7z2'])
+    parser.add_argument('-c', '--clusters', type=str, default=['r7z2'], nargs='+', choices=CLUSTER_INFO.keys())
     known_args = parser.parse_known_args()[0]
     _gpu_types = get_gpu_types(known_args.clusters)
     parser.add_argument('--gpu_types', type=str, default=['a100_40gb'], nargs='+', choices=_gpu_types)
