@@ -160,6 +160,7 @@ class MosaicGPT(nn.Module):
                 ]),
                 ln_f=nn.LayerNorm(cfg.d_model, device=cfg.device),
             ))
+<<<<<<< HEAD
         self.lm_head = nn.Linear(cfg.d_model,
                                  cfg.vocab_size,
                                  bias=False,
@@ -174,6 +175,8 @@ class MosaicGPT(nn.Module):
         if cfg.device == 'meta':
             # TODO: remove warning when fixed
             warnings.warn(f'device={cfg.device} embedding weight tying will be broken by FSDP')
+=======
+>>>>>>> wtie
 
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
@@ -194,7 +197,8 @@ class MosaicGPT(nn.Module):
         for block in self.transformer.blocks:  # type: ignore
             x = block(x, key_padding_mask)
         x = self.transformer.ln_f(x)  # type: ignore
-        logits = self.lm_head(x)
+        # output embedding weight tied to input embedding
+        logits = F.linear(x, self.transformer.wte.weight, None)
         return logits
 
     # Param Initialization, needed for device='meta' fast initialization
