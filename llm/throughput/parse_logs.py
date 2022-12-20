@@ -139,13 +139,14 @@ def parse_run(run):
     flops_per_seq = flops_per_token * seq_len
     mfu = 3 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
     
-    # there are 2 passes of a NN (fwd, bwd) - we multiply by 2 (no parameters to compute the gradient to)
-    attn_flops_per_seq = n_layers * 2 * (d_model * (seq_len**2))
-    mfu_w_attn = (3 * flops_per_seq + 2 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+    # there are 2 FLOPS per mac; there is A=Q*K^T and out=A*V ops (ie mult by 2)
+    attn_flops_per_seq = n_layers * 2 * 2 * (d_model * (seq_len**2))
+    # there are 2 ops in bwd pass and 1 in fwd pass so we mult by 3
+    mfu_w_attn = (3 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
 
     if a_ckpt:
         hfu = 4 * flops_per_seq * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
-        hfu_w_attn = (4 * flops_per_seq + 3 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
+        hfu_w_attn = (4 * flops_per_seq + 4 * attn_flops_per_seq) * throughput / (gpu_num * GPU_AVAILABLE_FLOPS)
     else:
         hfu = mfu
         hfu_w_attn = mfu_w_attn
