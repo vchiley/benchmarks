@@ -9,7 +9,6 @@ CLUSTER_INFO = {
     # Cluster: [(gpu_type, max_gpus_per_run)],
     'r1z1': [('a100_80gb',   8),],
     'r7z2': [('a100_40gb', 128),],
-    'stab1': [('a100_80gb',   344),],
 }
 
 
