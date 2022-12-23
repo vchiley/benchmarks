@@ -13,6 +13,9 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf as om
 from streaming import StreamingDataset, StreamingDataLoader
 
+import streaming
+print(f'{streaming.__version__=}')
+
 
 class StreamingTextDataset(StreamingDataset):
     """Generic implementation of a streaming text dataset using MosaicML's StreamingDataset.
