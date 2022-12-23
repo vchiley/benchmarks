@@ -195,7 +195,6 @@ def build_text_dataloader(cfg: DictConfig, device_batch_size: int):
 
 
 # Helpful to test if your dataloader is working locally
-# Note this currently does not work on MacOS (Jira: CO-1550)
 # Run `python data.py [remote] [local, optional]` and verify that batches are printed out
 if __name__ == '__main__':
     remote = sys.argv[1]
@@ -212,18 +211,18 @@ if __name__ == '__main__':
             'local': local,
             'split': 'val',
             'shuffle': True,
-            'prefetch': 100,
+            'prefetch': 1000,
             'tokenizer_name': 'gpt2',
             'max_seq_len': 32,
-            'group_method': 'truncate',
+            'group_method': 'concat',
             'num_canonical_nodes': None,
         },
         'drop_last': False,
-        'num_workers': 2,
+        'num_workers': 4,
         'pin_memory': True,
         'prefetch_factor': 2,
         'persistent_workers': True,
-        'timeout': 120,
+        'timeout': 60,
         'seed': 17,
     }
     cfg = om.create(cfg)
