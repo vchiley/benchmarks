@@ -246,11 +246,11 @@ class MosaicGPT(nn.Module):
             if self.alibi:
                 self.register_buffer(
                     'attn_mask',
-                    torch.empty((1, self.n_heads, 1, self.seq_len), device=cfg.device))
+                    torch.empty((1, cfg.n_heads, 1, cfg.max_seq_len), device=cfg.device))
             else:
                 self.register_buffer(
                     'attn_mask',
-                    torch.empty((1, 1, 1, self.seq_len), device=cfg.device))
+                    torch.empty((1, 1, 1, cfg.max_seq_len), device=cfg.device))
         else:
             raise ValueError(f'Unknown attn_impl={cfg.attn_impl}')
 
