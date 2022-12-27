@@ -101,73 +101,59 @@ class TritonFlashCausalAttention(nn.Module):
     def __init__(self, cfg: DictConfig, device: Optional[str] = None):
         super().__init__()
         try:
-            from src.flash_attn_triton import flash_attn_qkvpacked_func
-            self.mhsa = flash_attn_qkvpacked_func
+            from src.flash_attention import FlashMHA  # type: ignore
         except ImportError as e:
             raise e
         
-        assert not cfg.attn_pdrop, 'Triton kernel does not support attn dropout'
-            
-        if cfg.d_model % cfg.n_heads != 0:
-            raise ValueError(
-                f'The hidden size ({cfg.d_model}) is not a multiple of the number of attention '
-                f'heads ({cfg.n_heads})')
-
-        self.Wqkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=True, device=device)
+        self.mhsa = FlashMHA(
+            embed_dim=cfg.d_model,
+            num_heads=cfg.n_heads,
+            attention_dropout=cfg.attn_pdrop,
+            bias=True,
+            batch_first=True,
+            causal=True,
+            device=device,
+        )
+        self.mhsa.out_proj._is_residual = True
 
         self.alibi = cfg.get('alibi', False)
-        self.seq_len = cfg.max_seq_len
         self.n_heads = cfg.n_heads
+        self.seq_len = cfg.max_seq_len
         if self.alibi:
             self.register_buffer(
-                'attn_bias',
+                'attn_mask',
                 torch.empty((1, self.n_heads, 1, self.seq_len), device=device))
         else:
             self.register_buffer(
-                'attn_bias',
+                'attn_mask',
                 torch.empty((1, 1, 1, self.seq_len), device=device))
-        self.attn_bias_initialized = False
+        self.attn_mask_initialized = False
 
-        self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True, device=device)
-        self.out_proj._is_residual = True
-
-    def _fill_attn_bias(self, bias_max: int = 8):
-        self.attn_bias.zero_()
+    def _fill_attn_mask(self, bias_max: int = 8):
+        self.attn_mask.zero_()
 
         if self.alibi:
-            dtype, device = self.attn_bias.dtype, self.attn_bias.device
-            
+            dtype, device = self.attn_mask.dtype, self.attn_mask.device
+
             alibi_bias = torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, 1, self.seq_len)
-            
+
             m = torch.arange(1, self.n_heads + 1, dtype=dtype, device=device) * bias_max / self.n_heads
             alibi_bias = alibi_bias * (1. / (2 ** m.view(1, self.n_heads, 1, 1)))
 
-            self.attn_bias.add_(alibi_bias)
+            self.attn_mask.add_(alibi_bias)
 
-        self.attn_bias_initialized = True
+        self.attn_mask_initialized = True
 
-    def forward(self, x, key_padding_mask):
-        if key_padding_mask.bool().logical_not().any():
-            raise NotImplementedError(f'triton attn does not support key_padding_mask')
-        if not self.attn_bias_initialized:
-            self._fill_attn_bias()
-
-        qkv = self.Wqkv(x)
-        qkv = rearrange(qkv,
-                        'b s (t h d) -> b s t h d',
-                        t=3,
-                        h=self.n_heads)
-
-        if qkv.dtype not in [torch.float16, torch.bfloat16]:
-            raise TypeError(f'Triton kernel only supports inputs of dtype torch.float16 and torch.bfloat16 (input dtype: {qkv.dtype})')
-        attention = self.mhsa(
-            qkv,
-            self.attn_bias,
-            True,
-            None
-        )
-
-        return self.out_proj(rearrange(attention, 'b s h d -> b s (h d)')), None
+    def forward(self, x, key_padding_mask, attn_mask=None):
+        if attn_mask is None:
+            if not self.attn_bias_initialized:
+                self._fill_attn_mask()
+            attn_mask = self.attn_mask
+        return self.mhsa(
+            x,
+            key_padding_mask=None,
+            attn_mask=None,
+            need_weights=False)
 
 
 class GPTMLP(nn.Module):
