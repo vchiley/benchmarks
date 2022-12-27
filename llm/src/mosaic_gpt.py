@@ -214,6 +214,7 @@ class MosaicGPT(nn.Module):
         super().__init__()
         assert cfg.name == 'mosaic_gpt', f'Tried to build MosaicGPT model with cfg.name={cfg.name}'
         self.cfg = cfg
+        self.alibi = cfg.get("alibi", None)
         # CogView (https://arxiv.org/abs/2105.13290) and GLM-130B (https://arxiv.org/abs/2210.02414)
         # both report this helping with stabilizing training
         self.embedding_fraction = cfg.get("embedding_fraction", 1)
@@ -232,7 +233,6 @@ class MosaicGPT(nn.Module):
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
 
-        self.alibi = cfg.get("alibi", None)
         self.alibi_bias_max = cfg.get("alibi_bias_max", 8 if self.alibi else None)
         self._attn_mask_initialized = False
 
