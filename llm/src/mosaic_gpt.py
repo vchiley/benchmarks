@@ -367,6 +367,8 @@ class MosaicGPT(nn.Module):
                 x * self.embedding_fraction + x.detach() * (1 - self.embedding_fraction)
             )
         for block in self.transformer.blocks:  # type: ignore
+            if 'triton' in self.cfg.attn_impl:
+                key_padding_mask = None
             x = block(x, key_padding_mask, attn_mask)
         x = self.transformer.ln_f(x)  # type: ignore
         # output embedding weight tied to input embedding
