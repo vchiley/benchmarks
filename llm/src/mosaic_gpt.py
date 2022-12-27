@@ -46,7 +46,7 @@ class TorchCausalAttention(nn.Module):
                    out=self.mask)
         torch.triu(input=self.mask, diagonal=1, out=self.mask)
 
-    def forward(self, x, key_padding_mask):
+    def forward(self, x, key_padding_mask, attn_mask=None):
         # Two important disclaimers
         # 1. Torch uses additive attention. If your attn_mask/key_padding mask is a float tensor, it will add the floats
         #   directly to your attention matrix. If they are boolean masks, True will be converted to -inf before adding the
@@ -56,14 +56,15 @@ class TorchCausalAttention(nn.Module):
         # 2. This is is the exact opposite behavior of Huggingface's tokenizers, which use the convention that True denotes tokens
         #   we do want to attend to. See https://huggingface.co/docs/transformers/glossary#attention-mask
         #
-        if not self.mask_initialized:
-            self._fill_causal_attn_mask()
-            self.mask_initialized = True
-
+        if attn_mask is None:
+            if not self.mask_initialized:
+                self._fill_causal_attn_mask()
+                self.mask_initialized = True
+            attn_mask = self.mask
         return self.mhsa(x,
                          x,
                          x,
-                         attn_mask=self.mask,
+                         attn_mask=attn_mask,
                          key_padding_mask=~key_padding_mask,
                          need_weights=True)
 
