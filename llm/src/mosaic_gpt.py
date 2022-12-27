@@ -146,7 +146,8 @@ class TritonFlashCausalAttention(nn.Module):
 
         self.attn_mask_initialized = True
 
-    def forward(self, x, key_padding_mask, attn_mask=None):
+    def forward(self, x, key_padding_mask=None, attn_mask=None):
+        assert key_padding_mask is None
         if attn_mask is None:
             if not self.attn_mask_initialized:
                 self._fill_attn_mask()
