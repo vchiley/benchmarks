@@ -345,6 +345,7 @@ class MosaicGPT(nn.Module):
             attn_mask = None
         elif 'triton' in self.cfg.attn_impl:
             attn_mask = self._triton_attn_mask(tok_emb, max_s=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
+            key_padding_mask = None
         else:
             raise ValueError(f'Unknown attn_impl={self.cfgcfg.attn_impl}')
 
@@ -362,8 +363,6 @@ class MosaicGPT(nn.Module):
                 x * self.embedding_fraction + x.detach() * (1 - self.embedding_fraction)
             )
         for block in self.transformer.blocks:  # type: ignore
-            if 'triton' in self.cfg.attn_impl:
-                key_padding_mask = None
             x = block(x, key_padding_mask, attn_mask)
         x = self.transformer.ln_f(x)  # type: ignore
         # output embedding weight tied to input embedding
