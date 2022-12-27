@@ -152,7 +152,7 @@ class TritonFlashCausalAttention(nn.Module):
         return self.mhsa(
             x,
             key_padding_mask=None,
-            attn_mask=None,
+            attn_mask=attn_mask,
             need_weights=False)
 
 
