@@ -240,14 +240,9 @@ class MosaicGPT(nn.Module):
         self._attn_mask_initialized = False
 
         if cfg.attn_impl == 'torch':
-            if self.alibi:
-                self.register_buffer(
-                    'attn_mask',
-                    torch.empty((1, cfg.n_heads, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
-            else:
-                self.register_buffer(
-                    'attn_mask',
-                    torch.empty((1, 1, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
+            self.register_buffer(
+                'attn_mask',
+                torch.empty((cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
         elif cfg.attn_impl == 'flash':
             attn_mask = None
         elif 'triton' in cfg.attn_impl:
@@ -325,9 +320,7 @@ class MosaicGPT(nn.Module):
         torch.triu(input=self.attn_mask, diagonal=1, out=self.attn_mask)
 
         if self.alibi:
-            alibi_bias = self._alibi_bias(self.attn_mask.dtype, self.attn_mask.device, max_s, self.cfg.n_heads, full=True)
-
-            self.attn_mask.add_(alibi_bias)
+            raise NotImplementedError()
         
         self._attn_mask_initialized = True
 
