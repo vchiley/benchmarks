@@ -89,7 +89,8 @@ class FlashCausalAttention(nn.Module):
         )
         self.mhsa.out_proj._is_residual = True
 
-    def forward(self, x, key_padding_mask):
+    def forward(self, x, key_padding_mask, attn_mask=None):
+        assert not attn_mask
         return self.mhsa(x,
                          key_padding_mask=key_padding_mask,
                          need_weights=False)
@@ -197,10 +198,11 @@ class GPTBlock(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            key_padding_mask: Optional[torch.ByteTensor] = None
+            key_padding_mask: Optional[torch.ByteTensor] = None,
+            attn_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         a = self.ln_1(x)
-        b, _ = self.causal_attn(a, key_padding_mask)
+        b, _ = self.causal_attn(a, key_padding_mask, attn_mask)
         x = x + self.resid_attn_dropout(b)
         m = self.ln_2(x)
         n = self.mlp(m)
