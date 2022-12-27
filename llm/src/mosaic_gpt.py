@@ -258,7 +258,7 @@ class MosaicGPT(nn.Module):
         if self._attn_mask_initialized and key_padding_mask is None:
             return self.attn_mask
 
-        if key_padding_mask and key_padding_mask.bool().logical_not().any():
+        if key_padding_mask is not None and key_padding_mask.bool().logical_not().any():
             dtype, device = x.dtype, x.device
 
             n, s, d = x.shape

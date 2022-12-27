@@ -75,7 +75,7 @@ class FlashAttention(nn.Module):
         assert qkv.dtype in [torch.float16, torch.bfloat16]
         assert qkv.is_cuda
 
-        if key_padding_mask and key_padding_mask.bool().logical_not().any():
+        if key_padding_mask is not None and key_padding_mask.bool().logical_not().any():
             raise NotImplementedError(f'assumes key_padding_mask is taken care of by attn_mask')
         qkv = rearrange(qkv,
                         'b s (t h d) -> b s t h d',
