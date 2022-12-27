@@ -240,9 +240,14 @@ class MosaicGPT(nn.Module):
         self._attn_mask_initialized = False
 
         if cfg.attn_impl == 'torch':
-            self.register_buffer(
-                'attn_mask',
-                torch.empty((1, 1, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
+            if self.alibi:
+                self.register_buffer(
+                    'attn_mask',
+                    torch.empty((1, cfg.n_heads, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
+            else:
+                self.register_buffer(
+                    'attn_mask',
+                    torch.empty((1, 1, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
         elif cfg.attn_impl == 'flash':
             attn_mask = None
         elif 'triton' in cfg.attn_impl:
@@ -256,6 +261,15 @@ class MosaicGPT(nn.Module):
                     torch.empty((1, 1, 1, cfg.max_seq_len), device=cfg.device))
         else:
             raise ValueError(f'Unknown attn_impl={cfg.attn_impl}')
+    
+    def _alibi_bias(self, dtype, device, max_s, n_heads, full=False):
+        alibi_bias = torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, 1, max_s)
+        if full:
+            alibi_bias = alibi_bias + torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, max_s, 1)
+
+        m = torch.arange(1, n_heads + 1, dtype=dtype, device=device) * self.alibi_bias_max / n_heads
+        alibi_bias = alibi_bias * (1. / (2 ** m.view(1, n_heads, 1, 1)))
+        return alibi_bias
 
     def _triton_attn_mask(self, x, max_s=None, key_padding_mask=None):
         if self._attn_mask_initialized and key_padding_mask is None:
@@ -267,9 +281,9 @@ class MosaicGPT(nn.Module):
             n, s, d = x.shape
             if max_s:
                 max_s = max(s, max_s)
-            _h = self.cfg.n_heads if self.alibi else 1
+            n_heads = self.cfg.n_heads if self.alibi else 1
 
-            attn_mask = torch.zeros((n, _h, max_s, max_s), dtype=dtype, device=device)
+            attn_mask = torch.zeros((n, n_heads, max_s, max_s), dtype=dtype, device=device)
             
             m = (~key_padding_mask).reshape(n, 1, 1, max_s)
             m = m + (~key_padding_mask).reshape(n, 1, max_s, 1)
@@ -277,11 +291,7 @@ class MosaicGPT(nn.Module):
             attn_mask += m
 
             if self.alibi:
-                alibi_bias = torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, 1, max_s)
-                alibi_bias = alibi_bias + torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, max_s, 1)
-
-                m = torch.arange(1, _h + 1, dtype=dtype, device=device) * self.alibi_bias_max / _h
-                alibi_bias = alibi_bias * (1. / (2 ** m.view(1, _h, 1, 1)))
+                alibi_bias = self._alibi_bias(dtype, device, max_s, n_heads, full=True)
 
                 attn_mask.add_(alibi_bias)
 
@@ -296,12 +306,10 @@ class MosaicGPT(nn.Module):
         if self.alibi:
             dtype, device = self.attn_mask.dtype, self.attn_mask.device
 
-            alibi_bias = torch.arange(1 - self.cfg.max_seq_len, 1, dtype=dtype, device=device).view(1, 1, 1, self.cfg.max_seq_len)
+            if self.alibi:
+                alibi_bias = self._alibi_bias(dtype, device, max_s, self.cfg.n_heads, full=False)
 
-            m = torch.arange(1, self.cfg.n_heads + 1, dtype=dtype, device=device) * self.alibi_bias_max / self.cfg.n_heads
-            alibi_bias = alibi_bias * (1. / (2 ** m.view(1, self.cfg.n_heads, 1, 1)))
-
-            self.attn_mask.add_(alibi_bias)
+                self.attn_mask.add_(alibi_bias)
         
         self._attn_mask_initialized = True
         
@@ -317,13 +325,7 @@ class MosaicGPT(nn.Module):
         torch.triu(input=self.attn_mask, diagonal=1, out=self.attn_mask)
 
         if self.alibi:
-            dtype, device = self.attn_mask.dtype, self.attn_mask.device
-
-            alibi_bias = torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, 1, self.seq_len)
-            alibi_bias = alibi_bias + torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, self.seq_len, 1)
-
-            m = torch.arange(1, self.n_heads + 1, dtype=dtype, device=device) * self.alibi_bias_max / self.n_heads
-            alibi_bias = alibi_bias * (1. / (2 ** m.view(1, self.n_heads, 1, 1)))
+            alibi_bias = self._alibi_bias(self.attn_mask.dtype, self.attn_mask.device, max_s, self.cfg.n_heads, full=True)
 
             self.attn_mask.add_(alibi_bias)
         
