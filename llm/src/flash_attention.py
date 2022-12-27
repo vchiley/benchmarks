@@ -30,8 +30,9 @@ class FlashAttention(nn.Module):
         attention_dropout: The dropout rate to apply to the attention
                            (default: 0.0)
     """
-    def __init__(self, softmax_scale=None, attention_dropout=0.0, device=None, dtype=None):
+    def __init__(self, num_heads, softmax_scale=None, attention_dropout=0.0, device=None, dtype=None):
         super().__init__()
+        self.num_heads = num_heads
         self.softmax_scale = softmax_scale
         assert attention_dropout == 0
         self.dropout_p = attention_dropout
@@ -79,7 +80,7 @@ class FlashAttention(nn.Module):
         qkv = rearrange(qkv,
                         'b s (t h d) -> b s t h d',
                         t=3,
-                        h=self.num_attention_heads)
+                        h=self.num_heads)
 
         attn_output = flash_attn_qkvpacked_func(qkv, attn_mask, is_causal, None)
         output = rearrange(attn_output, 'b s h d -> b s (h d)')
@@ -102,7 +103,7 @@ class FlashMHA(nn.Module):
         assert self.head_dim % 8 == 0 and self.head_dim <= 128, "Only support head_dim <= 128 and divisible by 8"
 
         self.Wqkv = nn.Linear(embed_dim, 3 * embed_dim, bias=bias, **factory_kwargs)
-        self.inner_attn = FlashAttention(attention_dropout=attention_dropout, **factory_kwargs)
+        self.inner_attn = FlashAttention(num_heads=num_heads, attention_dropout=attention_dropout, **factory_kwargs)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
 
     def forward(self, x, key_padding_mask=None, attn_mask=None, need_weights=False):
