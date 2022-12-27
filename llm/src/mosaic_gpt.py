@@ -218,9 +218,7 @@ class MosaicGPT(nn.Module):
         # both report this helping with stabilizing training
         self.embedding_fraction = cfg.get("embedding_fraction", 1)
         assert 0 < self.embedding_fraction <= 1, "model.embedding_fraction must be between 0 (exclusive) and 1 (inclusive)!"
-        
-        self.alibi = cfg.get('alibi', False)
-        
+
         self.transformer = nn.ModuleDict({'wte': nn.Embedding(cfg.vocab_size, cfg.d_model, device=cfg.device)})
         if not self.alibi:
             self.transformer.update({'wpe': nn.Embedding(cfg.max_seq_len, cfg.d_model, device=cfg.device)})
@@ -234,6 +232,102 @@ class MosaicGPT(nn.Module):
         if cfg.device != 'meta':
             self.apply(self.param_init_fn)
 
+        self.alibi = cfg.get("alibi", None)
+        self.alibi_bias_max = cfg.get("alibi_bias_max", 8 if self.alibi else None)
+        self._attn_mask_initialized = False
+
+        if cfg.attn_impl == 'torch':
+            self.register_buffer(
+                'attn_mask',
+                torch.empty((1, 1, cfg.max_seq_len, cfg.max_seq_len), device=cfg.device))
+        elif cfg.attn_impl == 'flash':
+            attn_mask = None
+        elif 'triton' in cfg.attn_impl:
+            if self.alibi:
+                self.register_buffer(
+                    'attn_mask',
+                    torch.empty((1, self.n_heads, 1, self.seq_len), device=cfg.device))
+            else:
+                self.register_buffer(
+                    'attn_mask',
+                    torch.empty((1, 1, 1, self.seq_len), device=cfg.device))
+        else:
+            raise ValueError(f'Unknown attn_impl={cfg.attn_impl}')
+
+    def _triton_attn_mask(self, x, max_s=None, key_padding_mask=None):
+        if self._attn_mask_initialized and key_padding_mask is None:
+            return self.attn_mask
+
+        if key_padding_mask and key_padding_mask.bool().logical_not().any():
+            dtype, device = x.dtype, x.device
+
+            n, s, d = x.shape
+            if max_s:
+                max_s = max(s, max_s)
+            _h = self.cfg.n_heads if self.alibi else 1
+
+            attn_mask = torch.zeros((n, _h, max_s, max_s), dtype=dtype, device=device)
+            
+            m = (~key_padding_mask).reshape(n, 1, 1, max_s)
+            m = m + (~key_padding_mask).reshape(n, 1, max_s, 1)
+            m[m == 1] = float('-inf')
+            attn_mask += m
+
+            if self.alibi:
+                alibi_bias = torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, 1, max_s)
+                alibi_bias = alibi_bias + torch.arange(1 - max_s, 1, dtype=dtype, device=device).view(1, 1, max_s, 1)
+
+                m = torch.arange(1, _h + 1, dtype=dtype, device=device) * self.alibi_bias_max / _h
+                alibi_bias = alibi_bias * (1. / (2 ** m.view(1, _h, 1, 1)))
+
+                attn_mask.add_(alibi_bias)
+
+            return attn_mask
+
+        # default when no elems are 0 in key_padding_mask
+        if self._attn_mask_initialized:
+            return self.attn_mask
+
+        self.attn_mask.zero_()
+
+        if self.alibi:
+            dtype, device = self.attn_mask.dtype, self.attn_mask.device
+
+            alibi_bias = torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, 1, self.seq_len)
+
+            m = torch.arange(1, self.n_heads + 1, dtype=dtype, device=device) * self.alibi_bias_max / self.n_heads
+            alibi_bias = alibi_bias * (1. / (2 ** m.view(1, self.n_heads, 1, 1)))
+
+            self.attn_mask.add_(alibi_bias)
+        
+        self._attn_mask_initialized = True
+        
+        return self.attn_mask
+
+    def _torch_attn_mask(self, x, max_s=None):
+        if self._attn_mask_initialized:
+            return self.attn_mask
+        
+        if not max_s:
+            max_s = x.size(1)
+        self.attn_mask = torch.full(size=self.attn_mask.shape, fill_value=float('-inf'), out=self.attn_mask)
+        torch.triu(input=self.attn_mask, diagonal=1, out=self.attn_mask)
+
+        if self.alibi:
+            dtype, device = self.attn_mask.dtype, self.attn_mask.device
+
+            alibi_bias = torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, 1, self.seq_len)
+            alibi_bias = alibi_bias + torch.arange(1 - self.seq_len, 1, dtype=dtype, device=device).view(1, 1, self.seq_len, 1)
+
+            m = torch.arange(1, self.n_heads + 1, dtype=dtype, device=device) * self.alibi_bias_max / self.n_heads
+            alibi_bias = alibi_bias * (1. / (2 ** m.view(1, self.n_heads, 1, 1)))
+
+            self.attn_mask.add_(alibi_bias)
+        
+        self._attn_mask_initialized = True
+
+        return self.attn_mask
+
     def forward(self,
                 input_ids: torch.LongTensor,
                 key_padding_mask: Optional[torch.ByteTensor] = None):
@@ -245,11 +339,23 @@ class MosaicGPT(nn.Module):
                            device=input_ids.device).unsqueeze(0)
 
         tok_emb = self.transformer.wte(input_ids)  # type: ignore
-        if not self.alibi:
+
+        attn_mask = None
+        if self.cfg.attn_impl == 'torch':
+            attn_mask = self._torch_attn_mask(tok_emb, max_s=self.cfg.max_seq_len)
+        elif self.cfg.attn_impl == 'flash':
+            attn_mask = None
+        elif 'triton' in self.cfg.attn_impl:
+            attn_mask = self._triton_attn_mask(tok_emb, max_s=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
+        else:
+            raise ValueError(f'Unknown attn_impl={self.cfgcfg.attn_impl}')
+
+        if self.alibi:
+            x = tok_emb
+        else:
             pos_emb = self.transformer.wpe(pos)  # type: ignore
             x = tok_emb + pos_emb
-        else:
-            x = tok_emb
+
         if self.embedding_fraction == 1:
             x = self.transformer.emb_drop(x)  # type: ignore
         else:
@@ -258,7 +364,7 @@ class MosaicGPT(nn.Module):
                 x * self.embedding_fraction + x.detach() * (1 - self.embedding_fraction)
             )
         for block in self.transformer.blocks:  # type: ignore
-            x = block(x, key_padding_mask)
+            x = block(x, key_padding_mask, attn_mask)
         x = self.transformer.ln_f(x)  # type: ignore
         # output embedding weight tied to input embedding
         logits = F.linear(x, self.transformer.wte.weight, None)
