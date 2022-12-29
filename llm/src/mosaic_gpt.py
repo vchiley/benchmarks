@@ -344,7 +344,7 @@ class MosaicGPT(nn.Module):
         elif self.cfg.attn_impl == 'flash':
             attn_mask = None
         elif 'triton' in self.cfg.attn_impl:
-            # attn_mask = self._triton_attn_mask(tok_emb, max_s=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
+            attn_mask = self._triton_attn_mask(tok_emb, max_s=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
             key_padding_mask = None
         else:
             raise ValueError(f'Unknown attn_impl={self.cfgcfg.attn_impl}')
