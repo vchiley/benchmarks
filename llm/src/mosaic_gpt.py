@@ -246,7 +246,7 @@ class MosaicGPT(nn.Module):
         
         return self.attn_mask
 
-    def _torch_attn_mask(self, x, S=None, key_padding_mask=None):
+    def _torch_attn_mask(self, x, S=None):
         # Two important disclaimers
         # 1. Torch uses additive attention. If your attn_mask/key_padding mask is a float tensor, it will add the floats
         #   directly to your attention matrix. If they are boolean masks, True will be converted to -inf before adding the
@@ -272,11 +272,11 @@ class MosaicGPT(nn.Module):
 
     def _attn_mask(self, x, S=None, key_padding_mask=None):
         if self.cfg.attn_impl == 'torch':
-            return self._torch_attn_mask(x, max_s=self.cfg.max_seq_len)
+            return self._torch_attn_mask(x, S=self.cfg.max_seq_len)
         elif self.cfg.attn_impl == 'flash':
             return None
         elif 'triton' in self.cfg.attn_impl:
-            return self._triton_attn_mask(x, max_s=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
+            return self._triton_attn_mask(x, S=self.cfg.max_seq_len, key_padding_mask=key_padding_mask)
         else:
             raise ValueError(f'Unknown attn_impl={self.cfgcfg.attn_impl}')
 
