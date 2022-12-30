@@ -56,9 +56,9 @@ class StreamingTextDataset(Dataset):
                  timeout: float = 120,
                  batch_size: Optional[int] = None):
         # Validation
-        if split not in ['train', 'val']:
+        if split not in ['train', 'val', 'validation']:
             raise ValueError(
-                f"split='{split}' must be one of ['train', 'val'].")
+                f"split='{split}' must be one of ['train', 'val', 'validation'].")
         if group_method not in ['truncate', 'concat']:
             raise ValueError(
                 f"group_method='{group_method}' must be one of ['truncate', 'concat']."
