@@ -195,7 +195,7 @@ class GPTBlock(nn.Module):
         if self.scale_attn_by_inverse_layer_idx:
             assert cfg.attn_impl == 'triton', 'scale_attn_by_inverse_layer_idx is only integrated into triton kernel'
             cfg = copy.deepcopy(cfg)
-            cfg['softmax_scale'] = 1 / ((layer_idx + 1) * (cfg.d_model // cfg.n_heads))
+            cfg['softmax_scale'] = 1 / ((layer_idx + 1) * ((cfg.d_model // cfg.n_heads) ** 0.5))
 
         self.ln_1 = nn.LayerNorm(cfg.d_model, device=device)
         self.causal_attn = causal_attn_cls(cfg, device)
