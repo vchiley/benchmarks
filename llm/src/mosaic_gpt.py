@@ -7,6 +7,7 @@ Inspired by https://github.com/karpathy/minGPT/blob/master/mingpt/model.py
 """
 
 import math
+import copy
 from functools import partial
 from typing import Optional
 
@@ -124,6 +125,7 @@ class TritonFlashCausalAttention(nn.Module):
             bias=True,
             batch_first=True,
             causal=True,
+            softmax_scale=cfg.get('softmax_scale', None),
             device=device,
         )
         self.mhsa.out_proj._is_residual = True
@@ -185,10 +187,16 @@ class GPTMLP(nn.Module):
 
 class GPTBlock(nn.Module):
 
-    def __init__(self, cfg: DictConfig, causal_attn_cls, device: Optional[str] = None):
+    def __init__(self, cfg: DictConfig, causal_attn_cls, layer_idx: int = None, device: Optional[str] = None):
         super().__init__()
         if cfg.get('alibi', False):
             assert cfg.attn_impl == 'triton' or cfg.attn_impl == 'torch', 'Only triton kernel or torch supports alibi'
+        self.scale_attn_by_inverse_layer_idx = cfg.get('scale_attn_by_inverse_layer_idx', False)
+        if self.scale_attn_by_inverse_layer_idx:
+            assert cfg.attn_impl == 'triton', 'scale_attn_by_inverse_layer_idx is only integrated into triton kernel'
+            cfg = copy.deepcopy(cfg)
+            cfg['softmax_scale'] = 1 / ((layer_idx + 1) * (cfg.d_model // cfg.n_heads))
+
         self.ln_1 = nn.LayerNorm(cfg.d_model, device=device)
         self.causal_attn = causal_attn_cls(cfg, device)
         self.ln_2 = nn.LayerNorm(cfg.d_model, device=device)
@@ -238,8 +246,8 @@ class MosaicGPT(nn.Module):
             self.transformer.update({'wpe': nn.Embedding(cfg.max_seq_len, cfg.d_model, device=cfg.device)})
         self.transformer.update({'emb_drop': nn.Dropout(cfg.emb_pdrop)})
         self.transformer.update({'blocks': nn.ModuleList([
-                    GPTBlock(cfg, causal_attn_cls=self.causal_attn_cls, device=cfg.device)
-                    for _ in range(cfg.n_layers)
+                    GPTBlock(cfg, causal_attn_cls=self.causal_attn_cls, layer_idx=layer_idx, device=cfg.device)
+                    for layer_idx in range(cfg.n_layers)
                 ])})
         self.transformer.update({'ln_f': nn.LayerNorm(cfg.d_model, device=cfg.device)})
 
