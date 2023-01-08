@@ -14,6 +14,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import fairscale.nn as fsnn
+from fairscale.nn import MOELayer, Top2Gate
 from composer.metrics.nlp import LanguageCrossEntropy, Perplexity
 from composer.models.base import ComposerModel
 from omegaconf import DictConfig
@@ -195,6 +197,18 @@ class GPTMLP(nn.Module):
         return self.mlp_down(self.mlp_act(self.mlp_up(x)))
 
 
+class GPTMLPMoE(nn.Module):
+
+    def __init__(self, cfg: DictConfig, device: Optional[str] = None):
+        super().__init__()
+        self.moe = MOELayer(
+            gate=Top2Gate(model_dim=cfg.d_model, num_experts=cfg.moe.num_experts),
+            experts=nn.ModuleList([GPTMLP(cfg, device) for _ in range(cfg.moe.num_local_experts)]))
+
+    def forward(self, x):
+        return self.moe(x)
+
+
 class GPTBlock(nn.Module):
 
     def __init__(self, cfg: DictConfig, causal_attn_cls, device: Optional[str] = None):
@@ -204,7 +218,7 @@ class GPTBlock(nn.Module):
         self.ln_1 = nn.LayerNorm(cfg.d_model, device=device)
         self.causal_attn = causal_attn_cls(cfg, device)
         self.ln_2 = nn.LayerNorm(cfg.d_model, device=device)
-        self.mlp = GPTMLP(cfg, device=device)
+        self.mlp = GPTMLPMoE(cfg, device=device) if cfg.get('moe', None) else GPTMLP(cfg, device=device)
         self.resid_attn_dropout = nn.Dropout(cfg.resid_pdrop)
         self.resid_mlp_dropout = nn.Dropout(cfg.resid_pdrop)
 

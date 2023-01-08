@@ -11,7 +11,7 @@ from composer.loggers import WandBLogger
 from composer.optim import DecoupledAdamW
 from composer.optim.scheduler import (ConstantWithWarmupScheduler,
                                       CosineAnnealingWithWarmupScheduler)
-from composer.utils import dist, reproducibility
+from composer.utils import get_device ,dist, reproducibility
 from omegaconf import OmegaConf as om
 from src.text_data import build_text_dataloader
 from src.model_registry import COMPOSER_MODEL_REGISTRY
@@ -139,6 +139,11 @@ def build_dataloader(cfg, device_batch_size):
 
 
 def main(cfg):
+    device = None
+    dist_timeout = 1800
+    device = get_device(device)
+    dist.initialize_dist(device, dist_timeout)
+
     reproducibility.seed_all(cfg.seed)
 
     # Run Name
@@ -160,7 +165,10 @@ def main(cfg):
     cfg.n_params = sum(p.numel() for p in model.parameters())
     print(f'{cfg.n_params=:.2e}')
     if hasattr(model, 'num_fwd_flops'):
-        print(f'{model.num_fwd_flops=:.2e}')
+        if cfg.get('moe', False):
+            pass
+        else:
+            print(f'{model.num_fwd_flops=:.2e}')
 
     # Dataloaders
     print('Building train loader...')
