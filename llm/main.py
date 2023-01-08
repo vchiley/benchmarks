@@ -163,11 +163,14 @@ def main(cfg):
     print('Initializing model...')
     model = build_composer_model(cfg.model)
     cfg.n_params = sum(p.numel() for p in model.parameters())
-    print(f'{cfg.n_params=:.2e}')
     if hasattr(model, 'num_fwd_flops'):
         if cfg.get('moe', False):
-            pass
+            # TODO: not sure if this is correct anymore.
+            # This is probably the num params on rank0 and does not account for the 
+            # fact that each rank has its own set of MoE params
+            print(f'{cfg.n_params=:.2e}')
         else:
+            print(f'{cfg.n_params=:.2e}')
             print(f'{model.num_fwd_flops=:.2e}')
 
     # Dataloaders
