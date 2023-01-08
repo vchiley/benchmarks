@@ -14,7 +14,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import fairscale.nn as fsnn
 from fairscale.nn import MOELayer, Top2Gate
 from composer.metrics.nlp import LanguageCrossEntropy, Perplexity
 from composer.models.base import ComposerModel
