@@ -2,24 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import pathlib
 import sys
 import warnings
 
-from composer import Trainer, algorithms
-from composer.callbacks import LRMonitor, MemoryMonitor, OptimizerMonitor
-from composer.loggers import WandBLogger
-from composer.optim import DecoupledAdamW
-from composer.optim.scheduler import (ConstantWithWarmupScheduler,
-                                      CosineAnnealingWithWarmupScheduler)
+from composer import Trainer
+# from composer import algorithms
+# from composer.callbacks import LRMonitor, MemoryMonitor, OptimizerMonitor
+# from composer.loggers import WandBLogger
+# from composer.optim import DecoupledAdamW
+# from composer.optim.scheduler import (ConstantWithWarmupScheduler,
+#                                       CosineAnnealingWithWarmupScheduler)
 from composer.utils import dist, reproducibility
 from omegaconf import OmegaConf as om
 from src.model_registry import COMPOSER_MODEL_REGISTRY
 
-sys.path.append(str(pathlib.Path(__file__).parent.parent / 'common'))
-from builders import (build_algorithm, build_callback, build_dataloader,
-                      build_logger, build_optimizer, build_scheduler)
-from logging_utils import log_config
+from mosaicml_examples.builders import (build_algorithm, build_callback,
+                                        build_dataloader, build_logger,
+                                        build_optimizer, build_scheduler)
+from mosaicml_examples.logging_utils import log_config
 
 
 def calculate_batch_size_info(global_batch_size, device_microbatch_size):
@@ -87,6 +87,17 @@ def main(cfg):
     fsdp_config = om.to_container(fsdp_config,
                                   resolve=True) if fsdp_config else None
 
+    # Restrict model init device to 'meta' and 'cpu',
+    # using 'cuda' vs. 'cuda:id' is tricky and can lead to common user errors
+    # when multiple GPUs are available.
+    # Also 'meta' is only valid when using FSDP
+    assert cfg.model.device in ['meta', 'cpu']
+    if fsdp_config is None and cfg.model.device == 'meta':
+        print(
+            "Using init device `cfg.model.device='meta'` is only valid when using FSDP! "
+            "Reverting to `cfg.model.device='cpu'`.")
+        cfg.model.device = 'cpu'
+
     # Build Model
     # For fast initialization of MosaicGPT, use cfg.model.device='meta'
     print('Initializing model...')
@@ -125,7 +136,7 @@ def main(cfg):
     ]
 
     # Algorithms
-    algos = [
+    algorithms = [
         build_algorithm(name, algorithm_cfg)
         for name, algorithm_cfg in cfg.get('algorithms', {}).items()
     ]
@@ -141,15 +152,14 @@ def main(cfg):
         schedulers=scheduler,
         max_duration=cfg.max_duration,
         eval_interval=cfg.eval_interval,
-        eval_subset_num_batches=cfg.eval_loader.get('eval_subset_num_batches',
-                                                    -1),
-        progress_bar=cfg.progress_bar,
-        log_to_console=cfg.log_to_console,
-        console_log_interval='1ba',
+        eval_subset_num_batches=cfg.get('eval_subset_num_batches', -1),
+        progress_bar=cfg.get('progress_bar', False),
+        log_to_console=cfg.get('log_to_console', True),
+        console_log_interval=cfg.get('console_log_interval', '1ba'),
         loggers=loggers,
         callbacks=callbacks,
         precision=cfg.precision,
-        algorithms=algos,
+        algorithms=algorithms,
         device_train_microbatch_size=cfg.get('device_train_microbatch_size',
                                              'auto'),
         fsdp_config=fsdp_config,  # type: ignore

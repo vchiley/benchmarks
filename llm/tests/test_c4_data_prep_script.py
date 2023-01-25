@@ -8,14 +8,19 @@ import sys
 from argparse import Namespace
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent.parent / 'scripts'))
-from convert_c4 import main
+from convert_c4 import main  # type: ignore
 
 
 def test_download_script_from_api():
     # test calling it directly
     path = os.path.join(os.getcwd(), 'my-copy-c4-1')
     shutil.rmtree(path, ignore_errors=True)
-    main(Namespace(**{'splits': ['val'], 'out_root': './my-copy-c4-1'}))
+    main(
+        Namespace(**{
+            'splits': ['val'],
+            'out_root': './my-copy-c4-1',
+            'compression': None,
+        }))
     assert os.path.exists(path)
     shutil.rmtree(path, ignore_errors=False)
 

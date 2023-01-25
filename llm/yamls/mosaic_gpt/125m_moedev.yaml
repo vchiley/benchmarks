@@ -40,6 +40,7 @@ tokenizer:
 
 # Dataloaders
 train_loader:
+  name: text
   dataset:
     remote: *data_remote
     local: *data_local
@@ -57,6 +58,7 @@ train_loader:
   timeout: 0
 
 eval_loader:
+  name: text
   dataset:
     remote: *data_remote
     local: *data_local
