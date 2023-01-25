@@ -52,10 +52,6 @@ class FusedExpertsNetwork(torch.nn.Module):
         self.group = group or dist.group.WORLD
         world_size = C.get_world_size(group)
 
-        self.in_features = in_features
-        self.hidden_features = hidden_features
-        self.out_features = out_features or in_features
-
         self.world_size = world_size
         if num_global_experts is None:
             warnings.warn(f'initializing MoE expert layer with num_global_experts={world_size=}')
@@ -78,6 +74,18 @@ class FusedExpertsNetwork(torch.nn.Module):
         self.num_local_experts = num_global_experts // world_size or 1
         self.num_shards = world_size // num_global_experts or 1
 
+        self.is_postscore = is_postscore
+        self.a2a_ffn_overlap_degree = a2a_ffn_overlap_degree
+        self.use_2dh = use_2dh
+
+        self.set_parallel_strategy(parallel_type)
+
+        #### FFN specific ####
+
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        self.out_features = out_features or in_features
+
         assert self.hidden_features % self.num_shards == 0, f"Can't evenly divide hidden_features ({self.hidden_features}) to {self.num_shards} shards."
         local_hidden_features = self.hidden_features // self.num_shards
         self.batched_fc1_weight = Parameter(torch.empty(self.num_local_experts, local_hidden_features, self.in_features, **factory_kwargs))
@@ -94,12 +102,7 @@ class FusedExpertsNetwork(torch.nn.Module):
             activation_fn = lambda x: F.relu(x)
         self.activation_fn = activation_fn
 
-        self.set_parallel_strategy(parallel_type)
-
-        self.is_postscore = is_postscore
-
-        self.a2a_ffn_overlap_degree = a2a_ffn_overlap_degree
-        self.use_2dh = use_2dh
+        #### FFN specific end ####
 
         if scan_expert_func is not None:
             for n, p in self.named_parameters():
@@ -107,20 +110,21 @@ class FusedExpertsNetwork(torch.nn.Module):
         for n, p in self.named_parameters():
             setattr(p, '_tutel_expert', True)
 
-
     def extra_repr(self) -> str:
         num_local_experts = self.num_local_experts
         num_shards = self.num_shards
+        repr_str = f'{self.num_global_experts} experts running on {self.world_size} devices '
+        repr_str += f'({num_local_experts=}; {num_shards=})'
+
+        #### FFN specific ####
         in_features = self.in_features
         hidden_features = self.hidden_features
         out_features = self.out_features
-        return (
-            f'{self.num_global_experts} experts running on {self.world_size} devices '
-            f'({num_local_experts=}; {num_shards=}) with '
-            f'{in_features=}, {hidden_features=}, {out_features=}'
-        )
+
+        return repr_str + f' with {in_features=}, {hidden_features=}, {out_features=}'
 
     def reset_parameters(self) -> None:
+        #### FFN specific ####
         # same as nn.Linear except bias is set to 0
         init.kaiming_uniform_(self.batched_fc1_weight, a=math.sqrt(5))
         init.kaiming_uniform_(self.batched_fc2_weight, a=math.sqrt(5))
@@ -152,6 +156,7 @@ class FusedExpertsNetwork(torch.nn.Module):
             raise Exception('Unrecognized parallel type specified: %s' % parallel_type)
 
     def apply_parallel_strategy_to_weights(self):
+        #### FFN specific fn ####
         batched_fc1_weight = self.batched_fc1_weight
         batched_fc2_weight = self.batched_fc2_weight
         batched_fc1_bias = self.batched_fc1_bias
@@ -202,6 +207,7 @@ class FusedExpertsNetwork(torch.nn.Module):
         )
 
     def expert_fwd(self, x, dim):
+        #### FFN specific ####
         batched_fc1_weight, batched_fc2_weight, batched_fc1_bias, batched_fc2_bias = self.apply_parallel_strategy_to_weights()
 
         y = x.view(x.size(0), x.size(1), dim)

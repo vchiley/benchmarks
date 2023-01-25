@@ -36,6 +36,16 @@ class TopKGate(torch.nn.Module):
         self.normalize_gate = normalize_gate
         self.is_gshard_loss = is_gshard_loss
 
+    def extra_repr(self) -> str:
+        top_k = self.top_k
+        capacity_factor = self.capacity_factor
+        gate_noise = self.gate_noise
+
+        repr_str = f'{top_k=} gate with {capacity_factor=} and {gate_noise=}'
+        repr_str += ' in fp32.' if self.fp32_gate else ' in default precision.'
+
+        return repr_str
+
     def routing(self, logits, num_shards, a2a_ffn_overlap_degree=1):
         if self.training and self.gate_noise > 0:
             logits_w_noise = logits + self.gate_noise * torch.randn_like(logits) / self.num_global_experts
@@ -66,7 +76,7 @@ class TopKGate(torch.nn.Module):
         assert len(shape) >= 2, "Input data must be at least 2D tensor: (s)amples, .., (m)odel_dim"
         x = x.view(-1, shape[-1])
 
-        logits = self.gate_forward(x)
+        logits = self.gate_fwd(x)
 
         if x.is_cuda:
             with torch.cuda.amp.autocast(enabled=False):
@@ -110,16 +120,9 @@ class LinearTopKGate(TopKGate):
         self.gate = torch.nn.Linear(in_features, num_global_experts, bias=False, **factory_kwargs)
 
     def extra_repr(self) -> str:
-        top_k = self.top_k
-        capacity_factor = self.capacity_factor
-        gate_noise = self.gate_noise
+        return 'Linear ' + super().extra_repr()
 
-        repr_str = f'Linear {top_k=} gate with {capacity_factor=} and {gate_noise=}'
-        repr_str += ' in fp32' if self.fp32_gate else ' in default precision'
-
-        return repr_str
-
-    def gate_forward(self, x):
+    def gate_fwd(self, x):
         gate = self.gate.float() if self.fp32_gate else self.gate
         return gate(x.float() if self.fp32_gate else x)
 

@@ -650,13 +650,18 @@ class ComposerMosaicGPT(ComposerModel):
             return self.__num_fwd_flops
 
         if self.model.cfg.get('moe', None) is not None:
-            gate_k = self.model.cfg.moe.get('gate_k', 1)
             n_params_expert_active = 0
             for n, m in self.named_modules():
                 # pretty bad way to identify MoE layer, but it is what it is...
                 if n[-len('.moe'):] == '.moe':
+                    gate_k = m.gate.top_k
+                    capacity_factor = m.gate.capacity_factor
+
                     _n_params_expert_active = sum(p.numel() for _n, p in m.named_parameters() if 'expert' in _n)
-                    n_params_expert_active += gate_k * _n_params_expert_active // m.num_local_experts * m.sharded_count
+                    _n_params_expert_active = gate_k * _n_params_expert_active // m.num_local_experts * m.sharded_count
+                    # artificially inflate to account for additional flops due to capacity factor
+                    n_params_expert_active += capacity_factor * _n_params_expert_active
+
             n_params_other = sum(p.numel() for n, p in self.named_parameters() if 'expert' not in n)
             n_active_params = n_params_other + n_params_expert_active
         else:
