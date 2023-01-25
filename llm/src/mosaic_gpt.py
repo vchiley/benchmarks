@@ -19,11 +19,16 @@ from composer.models.base import ComposerModel
 from composer.utils import get_device, dist
 from omegaconf import DictConfig
 from omegaconf.listconfig import ListConfig
-from tutel import moe as tutel_moe
-from tutel.impls.moe_layer import MOELayer
-from tutel.experts.ffn import FusedExpertsNetwork
-from tutel.gates.cosine_top import CosineTopKGate
-from tutel.gates.top import LinearTopKGate
+
+# from tutel import moe as tutel_moe
+# from tutel.impls.moe_layer import MOELayer
+# from tutel.gates.top import LinearTopKGate
+# from tutel.experts.ffn import FusedExpertsNetwork
+from .mosaic_moe.moe_layer import MOELayer
+from .mosaic_moe.gates.top import TopKGate, LinearTopKGate
+from .mosaic_moe.experts.ffn import FusedExpertsNetwork
+
+from .mosaic_moe.experts.utils import SeedContextManager
 
 
 class TorchCausalAttention(nn.Module):
@@ -207,64 +212,48 @@ class GPTMLPMoE(nn.Module):
     def __init__(self, cfg: DictConfig, block_idx: int, device: Optional[str] = None):
         super().__init__()
         dist.initialize_dist(get_device(None), timeout=1800)
-        world_size = dist.get_world_size()
         num_experts = cfg.moe.get('num_experts')
         if isinstance(num_experts, ListConfig):
             # enables pyramid moe
             num_experts = num_experts[block_idx]
-        if num_experts >= world_size:
-            assert num_experts % world_size == 0
-            num_local_experts = num_experts // world_size
-        else:
-            assert world_size % num_experts == 0
-            num_local_experts = - world_size // num_experts
-
-        gate_type = {
-            'type': cfg.moe.get('gate_type', 'top'),
-            'k': cfg.moe.get('gate_k', 1),
-            'fp32_gate': cfg.moe.get('fp32_gate', True),
-            'device': device}
-
-        if cfg.moe.get('capacity_factor', None) is not None:
-            gate_type['capacity_factor'] = cfg.moe.get('capacity_factor')
-
-        if cfg.moe.get('gate_noise', None) is not None:
-            gate_type['gate_noise'] = cfg.moe.get('gate_noise')
-
-        experts = {
-            'count_per_node': num_local_experts,
-            'type': cfg.moe.get('experts_type', 'ffn'),
-            'hidden_size_per_expert': cfg.mlp_ratio * cfg.d_model,
-            'activation_fn': lambda x: F.gelu(x, approximate='none')}
-
-        cpu_rng_state = torch.get_rng_state()
-        if torch.cuda.is_initialized():
-            from torch.utils.checkpoint import get_device_states, set_device_states
-            gpu_devices, gpu_rng_states = get_device_states(dist.get_global_rank())
 
         rank_seed = torch.initial_seed() + dist.get_global_rank()
-        self.moe = tutel_moe.moe_layer(
-            gate_type=gate_type,
-            model_dim=cfg.d_model,
-            experts=experts,
-            scan_expert_func=lambda name, param: setattr(param, 'moe_expert', True),
-            result_func=cfg.moe.get('result_func', None),
-            group=cfg.moe.get('group', None),
-            seeds=(rank_seed, rank_seed, rank_seed),
-            a2a_ffn_overlap_degree=cfg.moe.get('a2a_ffn_overlap_degree', 1),
-            is_postscore=cfg.moe.get('is_postscore', True),
+        with SeedContextManager(gpu_devices=[dist.get_global_rank()], seed=rank_seed) as s_ctx_mgr:
+            expert = FusedExpertsNetwork(
+                in_features=cfg.d_model,
+                hidden_features=cfg.mlp_ratio * cfg.d_model,
+                num_global_experts=num_experts,
+                out_features=cfg.d_model,
+                bias=True,
+                activation_fn=lambda x: F.gelu(x, approximate='none'),
+                a2a_ffn_overlap_degree=cfg.moe.get('a2a_ffn_overlap_degree', 1),
+                is_postscore=cfg.moe.get('is_postscore', True),
+                parallel_type=cfg.moe.get('parallel_type', 'auto'),
+                use_2dh=cfg.moe.get('use_2dh', False),
+                group=cfg.moe.get('group', None),
+                scan_expert_func=lambda name, param: setattr(param, '_moe_expert', True),
+                device=device,
+                dtype=None,
+            )
+        expert.batched_fc2_weight._is_residual = True  # type: ignore
+
+        gate = LinearTopKGate(
+            in_features=cfg.d_model,
+            num_global_experts=num_experts,
+            k=cfg.moe.get('gate_k', 1),
+            fp32_gate=cfg.moe.get('fp32_gate', True),
+            capacity_factor=cfg.moe.get('capacity_factor', 1.),
+            gate_noise=cfg.moe.get('gate_noise', 0.),
+            inequivalent_tokens=cfg.moe.get('inequivalent_tokens', False),
             batch_prioritized_routing=cfg.moe.get('batch_prioritized_routing', False),
             normalize_gate=cfg.moe.get('normalize_gate', True),
             is_gshard_loss=cfg.moe.get('is_gshard_loss', True),
-            parallel_type=cfg.moe.get('parallel_type', 'auto'),
-            use_2dh=cfg.moe.get('use_2dh', False),
+            group=expert.group,
+            device=device,
+            dtype=None,
         )
 
-        torch.set_rng_state(cpu_rng_state)
-        if torch.cuda.is_initialized():
-            set_device_states(gpu_devices, gpu_rng_states)
-
-        self.moe.experts.batched_fc2_w._is_residual = True  # type: ignore
+        self.moe = MOELayer(gate=gate, expert=expert)
 
     def forward(self, x):
         return self.moe(x)
@@ -473,44 +462,33 @@ class MosaicGPT(nn.Module):
 
         if isinstance(module, MOELayer):
             # set buffer
-            local_expert = -module.sharded_count if module.sharded_count > 1 else module.num_local_experts
-            module._num_global_experts = torch.tensor(module.global_expert_count(local_expert, module.group))
+            # local_expert = -module.sharded_count if module.sharded_count > 1 else module.num_local_experts
+            # module._num_global_experts = torch.tensor(module.global_expert_count(local_expert, module.group))
+            pass
 
         if isinstance(module, FusedExpertsNetwork):
             # although the module is supposed to be ignored by FSDP,
             # model.apply will still run param_init_fn on the entire model
             # so FusedExpertsNetwork must be initialized here
-            cpu_rng_state = torch.get_rng_state()
-            if torch.cuda.is_initialized():
-                from torch.utils.checkpoint import get_device_states, set_device_states
-                gpu_devices, gpu_rng_states = get_device_states(
-                    module.batched_fc1_w, module.batched_fc2_w)
 
             # guarentee init seeds are different for all devices
-            torch.manual_seed(torch.initial_seed() + dist.get_global_rank())
-
-            if self.cfg.get('init_experts', False):
-                init_fn(module.batched_fc1_w)
-                module.batched_fc2_w.data.normal_(
-                    mean=0.0,
-                    std=(self.cfg.init_std / math.sqrt(2 * self.cfg.n_layers)))
-            else:
-                # use default linear init since that is what is used by tutel
-                # still zero init bias)
-                torch.nn.init.kaiming_uniform_(module.batched_fc1_w, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(module.batched_fc2_w, a=math.sqrt(5))
+            # SeedContextManager sets the given seed, then restore local when finished
+            rank_seed = torch.initial_seed() + dist.get_global_rank()
+            with SeedContextManager(module.batched_fc1_weight, module.batched_fc2_weight, seed=rank_seed) as s_ctx_mgr:
+                if self.cfg.get('init_experts', False):
+                    init_fn(module.batched_fc1_weight)
+                    module.batched_fc2_weight.data.normal_(
+                        mean=0.0,
+                        std=(self.cfg.init_std / math.sqrt(2 * self.cfg.n_layers)))
+                else:
+                    # use default linear init since that is what is used by tutel
+                    # still zero init bias)
+                    torch.nn.init.kaiming_uniform_(module.batched_fc1_weight, a=math.sqrt(5))
+                    torch.nn.init.kaiming_uniform_(module.batched_fc2_weight, a=math.sqrt(5))
             torch.nn.init.zeros_(module.batched_fc1_bias)
             torch.nn.init.zeros_(module.batched_fc2_bias)
 
-            torch.set_rng_state(cpu_rng_state)
-            if torch.cuda.is_initialized():
-                set_device_states(gpu_devices, gpu_rng_states)
-
-        if isinstance(module, CosineTopKGate):
-            # Linear handeled by nn.Linear
-            raise NotImplementedError('check init of buffers')
-
-        if isinstance(module, LinearTopKGate):
+        if isinstance(module, TopKGate):
             # Linear handeled by nn.Linear
             pass
 
@@ -534,7 +512,7 @@ class MosaicGPT(nn.Module):
                 return False
             wrapable_cls = (
                 TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
-                CosineTopKGate, LinearTopKGate,
+                TopKGate,
             )
             return isinstance(module, wrapable_cls)
 
@@ -620,14 +598,15 @@ class ComposerMosaicGPT(ComposerModel):
             return self.__num_fwd_flops
 
         if self.model.cfg.get('moe', None) is not None:
-            n_params_expert = 0
+            gate_k = self.model.cfg.moe.get('gate_k', 1)
+            n_params_expert_active = 0
             for n, m in self.named_modules():
                 # pretty bad way to identify MoE layer, but it is what it is...
                 if n[-len('.moe'):] == '.moe':
-                    _n_params_expert = sum(p.numel() for _n, p in m.named_parameters() if 'expert' in _n)
-                    n_params_expert += _n_params_expert // m.num_local_experts * m.sharded_count
+                    _n_params_expert_active = sum(p.numel() for _n, p in m.named_parameters() if 'expert' in _n)
+                    n_params_expert_active += gate_k * _n_params_expert_active // m.num_local_experts * m.sharded_count
             n_params_other = sum(p.numel() for n, p in self.named_parameters() if 'expert' not in n)
-            n_active_params = n_params_other + n_params_expert
+            n_active_params = n_params_other + n_params_expert_active
         else:
             n_active_params = self.param_count
 
