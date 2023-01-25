@@ -17,37 +17,21 @@ from tutel.impls.fast_dispatch import fast_encode, fast_decode
 from tutel.impls.overlap import a2a_ffn_overlap_forward
 
 
-class FusedExpertsNetwork(torch.nn.Module):
-    __constants__ = ['in_features', 'hidden_features', 'out_features', 'num_global_experts']
-    in_features: int
-    hidden_features: int
-    out_features: int
+class ExpertsNetwork(torch.nn.Module):
+    __constants__ = ['num_global_experts']
     num_global_experts: int
-    batched_fc1_weight: Tensor
-    batched_fc2_weight: Tensor
 
     def __init__(
         self,
-        in_features,
-        hidden_features,
         num_global_experts=None,
-        out_features=None,
-        bias=True,
-        activation_fn=None,
         a2a_ffn_overlap_degree=1,
         is_postscore=True,
         parallel_type='auto',
         use_2dh=False,
         group=None,
         scan_expert_func=None,
-        device=None,
-        dtype=None,
     ):
-        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
-
-        if in_features % 2:
-            raise ValueError(f'in_features ({in_features}) must be an even value.')
 
         self.group = group or dist.group.WORLD
         world_size = C.get_world_size(group)
@@ -80,58 +64,14 @@ class FusedExpertsNetwork(torch.nn.Module):
 
         self.set_parallel_strategy(parallel_type)
 
-        #### FFN specific ####
-
-        self.in_features = in_features
-        self.hidden_features = hidden_features
-        self.out_features = out_features or in_features
-
-        assert self.hidden_features % self.num_shards == 0, f"Can't evenly divide hidden_features ({self.hidden_features}) to {self.num_shards} shards."
-        local_hidden_features = self.hidden_features // self.num_shards
-        self.batched_fc1_weight = Parameter(torch.empty(self.num_local_experts, local_hidden_features, self.in_features, **factory_kwargs))
-        self.batched_fc2_weight = Parameter(torch.empty(self.num_local_experts, local_hidden_features, self.out_features, **factory_kwargs))
-        if bias:
-            self.batched_fc1_bias = Parameter(torch.empty(self.num_local_experts, 1, local_hidden_features, **factory_kwargs))
-            self.batched_fc2_bias = Parameter(torch.empty(self.num_local_experts, 1, (self.out_features + self.num_shards - 1) // self.num_shards, **factory_kwargs))
-        else:
-            self.register_parameter('batched_fc1_bias', None)
-            self.register_parameter('batched_fc2_bias', None)
-        self.reset_parameters()
-
-        if activation_fn is None:
-            activation_fn = lambda x: F.relu(x)
-        self.activation_fn = activation_fn
-
-        #### FFN specific end ####
-
-        if scan_expert_func is not None:
-            for n, p in self.named_parameters():
-                scan_expert_func(n, p)
-        for n, p in self.named_parameters():
-            setattr(p, '_tutel_expert', True)
+        self.scan_expert_func = scan_expert_func
 
     def extra_repr(self) -> str:
         num_local_experts = self.num_local_experts
         num_shards = self.num_shards
         repr_str = f'{self.num_global_experts} experts running on {self.world_size} devices '
         repr_str += f'({num_local_experts=}; {num_shards=})'
-
-        #### FFN specific ####
-        in_features = self.in_features
-        hidden_features = self.hidden_features
-        out_features = self.out_features
-
-        return repr_str + f' with {in_features=}, {hidden_features=}, {out_features=}'
-
-    def reset_parameters(self) -> None:
-        #### FFN specific ####
-        # same as nn.Linear except bias is set to 0
-        init.kaiming_uniform_(self.batched_fc1_weight, a=math.sqrt(5))
-        init.kaiming_uniform_(self.batched_fc2_weight, a=math.sqrt(5))
-        if self.batched_fc1_bias is not None:
-            torch.nn.init.zeros_(self.batched_fc1_bias)
-        if self.batched_fc1_bias is not None:
-            torch.nn.init.zeros_(self.batched_fc2_bias)
+        return repr_str
 
     def set_parallel_strategy(self, parallel_type):
         # set up parallelization strategy
@@ -154,6 +94,130 @@ class FusedExpertsNetwork(torch.nn.Module):
             self.auto_parallel, self.use_model_parallel = True, False
         else:
             raise Exception('Unrecognized parallel type specified: %s' % parallel_type)
+
+    def forward(self, x, logits_dtype, crit):
+        shape = x.shape
+        x = x.view(-1, shape[-1])
+
+        y = fast_encode(x.to(logits_dtype), crit, self.is_postscore).to(x.dtype)
+
+        if self.force_data_parallel:
+            y = self.expert_fwd(y, shape[-1])
+        else:
+            if self.auto_parallel:
+                self.use_model_parallel = (y.numel() * (self.num_shards - 1) * 2 < sum([x.numel() for x in self.parameters()]))
+
+            if self.num_global_experts < self.world_size:
+                if self.use_model_parallel:
+                    y = y.repeat(1, self.adaptive_degree, 1).view(self.world_size, -1, y.size(2))
+                else:
+                    y = y.view(self.world_size, -1, y.size(2))
+
+            if self.a2a_ffn_overlap_degree > 1 and y.is_cuda:
+                def expert_fn(expert_input):
+                    return self.expert_fwd(expert_input, shape[-1])
+                y = a2a_ffn_overlap_forward(y, expert_fn=expert_fn, a2a_ffn_overlap_degree=self.a2a_ffn_overlap_degree, use_2dh=self.use_2dh, group=self.group)
+            else:
+                y = C.all_to_all(y, 1, 0, use_2dh=self.use_2dh, group=self.group)
+                y = self.expert_fwd(y, shape[-1])
+                y = C.all_to_all(y, 0, 1, use_2dh=self.use_2dh, group=self.group)
+
+            if self.num_global_experts < self.world_size:
+                if self.use_model_parallel:
+                    y = torch.sum(y.view(self.num_global_experts, self.adaptive_degree, -1, y.size(2)), dim=1)
+                else:
+                    y = y.view(self.num_global_experts, -1, y.size(2))
+
+        y = fast_decode(y.to(logits_dtype), crit, self.is_postscore)
+
+        y = y.view(list(shape[:-1]) + [self.out_features])
+
+        return y
+
+
+class FusedExpertsNetwork(ExpertsNetwork):
+    __constants__ = ['in_features', 'hidden_features', 'out_features']
+    in_features: int
+    hidden_features: int
+    out_features: int
+    batched_fc1_weight: Tensor
+    batched_fc2_weight: Tensor
+
+    def __init__(
+        self,
+        in_features,
+        hidden_features,
+        num_global_experts=None,
+        out_features=None,
+        bias=True,
+        activation_fn=None,
+        a2a_ffn_overlap_degree=1,
+        is_postscore=True,
+        parallel_type='auto',
+        use_2dh=False,
+        group=None,
+        scan_expert_func=None,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__(
+            num_global_experts=num_global_experts,
+            a2a_ffn_overlap_degree=a2a_ffn_overlap_degree,
+            is_postscore=is_postscore,
+            parallel_type=parallel_type,
+            use_2dh=use_2dh,
+            group=group,
+            scan_expert_func=scan_expert_func,
+        )
+
+        if in_features % 2:
+            raise ValueError(f'in_features ({in_features}) must be an even value.')
+
+        #### FFN specific ####
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        self.out_features = out_features or in_features
+
+        assert self.hidden_features % self.num_shards == 0, f"Can't evenly divide hidden_features ({self.hidden_features}) to {self.num_shards} shards."
+        local_hidden_features = self.hidden_features // self.num_shards
+        self.batched_fc1_weight = Parameter(torch.empty(self.num_local_experts, local_hidden_features, self.in_features, **factory_kwargs))
+        self.batched_fc2_weight = Parameter(torch.empty(self.num_local_experts, local_hidden_features, self.out_features, **factory_kwargs))
+        if bias:
+            self.batched_fc1_bias = Parameter(torch.empty(self.num_local_experts, 1, local_hidden_features, **factory_kwargs))
+            self.batched_fc2_bias = Parameter(torch.empty(self.num_local_experts, 1, (self.out_features + self.num_shards - 1) // self.num_shards, **factory_kwargs))
+        else:
+            self.register_parameter('batched_fc1_bias', None)
+            self.register_parameter('batched_fc2_bias', None)
+        self.reset_parameters()
+
+        if activation_fn is None:
+            activation_fn = lambda x: F.relu(x)
+        self.activation_fn = activation_fn
+
+        #### FFN specific end ####
+        if self.scan_expert_func is not None:
+            for n, p in self.named_parameters():
+                self.scan_expert_func(n, p)
+        for n, p in self.named_parameters():
+            setattr(p, '_tutel_expert', True)
+
+    def extra_repr(self) -> str:
+        in_features = self.in_features
+        hidden_features = self.hidden_features
+        out_features = self.out_features
+
+        return super().extra_repr() + f' with {in_features=}, {hidden_features=}, {out_features=}'
+
+    def reset_parameters(self) -> None:
+        #### FFN specific ####
+        # same as nn.Linear except bias is set to 0
+        init.kaiming_uniform_(self.batched_fc1_weight, a=math.sqrt(5))
+        init.kaiming_uniform_(self.batched_fc2_weight, a=math.sqrt(5))
+        if self.batched_fc1_bias is not None:
+            torch.nn.init.zeros_(self.batched_fc1_bias)
+        if self.batched_fc1_bias is not None:
+            torch.nn.init.zeros_(self.batched_fc2_bias)
 
     def apply_parallel_strategy_to_weights(self):
         #### FFN specific fn ####
@@ -215,45 +279,6 @@ class FusedExpertsNetwork(torch.nn.Module):
         y = torch.add(torch.matmul(y, batched_fc1_weight), batched_fc1_bias)
         y = self.activation_fn(y)
         y = torch.add(torch.matmul(y, batched_fc2_weight), batched_fc2_bias)
-
-        return y
-
-    def forward(self, x, logits_dtype, crit):
-        shape = x.shape
-        x = x.view(-1, shape[-1])
-
-        y = fast_encode(x.to(logits_dtype), crit, self.is_postscore).to(x.dtype)
-
-        if self.force_data_parallel:
-            y = self.expert_fwd(y, shape[-1])
-        else:
-            if self.auto_parallel:
-                self.use_model_parallel = (y.numel() * (self.num_shards - 1) * 2 < sum([x.numel() for x in self.parameters()]))
-
-            if self.num_global_experts < self.world_size:
-                if self.use_model_parallel:
-                    y = y.repeat(1, self.adaptive_degree, 1).view(self.world_size, -1, y.size(2))
-                else:
-                    y = y.view(self.world_size, -1, y.size(2))
-
-            if self.a2a_ffn_overlap_degree > 1 and y.is_cuda:
-                def expert_fn(expert_input):
-                    return self.expert_fwd(expert_input, shape[-1])
-                y = a2a_ffn_overlap_forward(y, expert_fn=expert_fn, a2a_ffn_overlap_degree=self.a2a_ffn_overlap_degree, use_2dh=self.use_2dh, group=self.group)
-            else:
-                y = C.all_to_all(y, 1, 0, use_2dh=self.use_2dh, group=self.group)
-                y = self.expert_fwd(y, shape[-1])
-                y = C.all_to_all(y, 0, 1, use_2dh=self.use_2dh, group=self.group)
-
-            if self.num_global_experts < self.world_size:
-                if self.use_model_parallel:
-                    y = torch.sum(y.view(self.num_global_experts, self.adaptive_degree, -1, y.size(2)), dim=1)
-                else:
-                    y = y.view(self.num_global_experts, -1, y.size(2))
-
-        y = fast_decode(y.to(logits_dtype), crit, self.is_postscore)
-
-        y = y.view(list(shape[:-1]) + [self.out_features])
 
         return y
 
