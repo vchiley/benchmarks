@@ -6,12 +6,6 @@ import sys
 import warnings
 
 from composer import Trainer
-# from composer import algorithms
-# from composer.callbacks import LRMonitor, MemoryMonitor, OptimizerMonitor
-# from composer.loggers import WandBLogger
-# from composer.optim import DecoupledAdamW
-# from composer.optim.scheduler import (ConstantWithWarmupScheduler,
-#                                       CosineAnnealingWithWarmupScheduler)
 from composer.utils import dist, reproducibility
 from omegaconf import OmegaConf as om
 from src.model_registry import COMPOSER_MODEL_REGISTRY
