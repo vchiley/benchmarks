@@ -233,7 +233,7 @@ class GPTMLPMoE(nn.Module):
             num_experts = num_experts[block_idx]
 
         rank_seed = torch.initial_seed() + dist.get_global_rank()
-        with SeedContextManager(gpu_devices=[dist.get_global_rank()], seed=rank_seed) as s_ctx_mgr:
+        with SeedContextManager(gpu_devices=[torch.cuda.current_device()], seed=rank_seed) as s_ctx_mgr:
             expert = FusedExpertsNetwork(
                 in_features=cfg.d_model,
                 hidden_features=cfg.mlp_ratio * cfg.d_model,
