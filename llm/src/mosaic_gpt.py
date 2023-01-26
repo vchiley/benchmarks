@@ -570,7 +570,16 @@ class MosaicGPT(nn.Module):
 
     # Activation Checkpointing
     def activation_checkpointing_fn(self, module):
-        return isinstance(module, GPTBlock)
+        if not self.cfg.get('moe', None):
+            return isinstance(module, GPTBlock)
+        else:
+            # MoE wrapping fn mirorring the fsdp module wrapping
+            if isinstance(module, (GPTMLPMoE, MOELayer, FusedExpertsNetwork)):
+                return False
+            wrapable_cls = (
+                TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
+            )
+            return isinstance(module, wrapable_cls)
 
 
 class ComposerMosaicGPT(ComposerModel):
