@@ -574,10 +574,12 @@ class MosaicGPT(nn.Module):
             return isinstance(module, GPTBlock)
         else:
             # MoE wrapping fn mirorring the fsdp module wrapping
+            # I think that if modules are fsdp wrapped, they can be wrapped in act chpt; otherwise it doesn't work.
             if isinstance(module, (GPTMLPMoE, MOELayer, FusedExpertsNetwork)):
                 return False
             wrapable_cls = (
                 TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
+                TopKGate,
             )
             return isinstance(module, wrapable_cls)
 
