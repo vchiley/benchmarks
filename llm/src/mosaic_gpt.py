@@ -560,7 +560,7 @@ class MosaicGPT(nn.Module):
             #                 block including the main model fsdp block
             #   nn.Linear: already part of GPTMLP, Attnetion layer or gate layer
             #   every other type of layer not in model
-            if isinstance(module, (GPTMLPMoE, MOELayer, FusedExpertsNetwork)):
+            if isinstance(module, (GPTMLPMoE, MOELayer)):
                 return False
             wrapable_cls = (
                 TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
@@ -575,11 +575,11 @@ class MosaicGPT(nn.Module):
         else:
             # MoE wrapping fn mirorring the fsdp module wrapping
             # I think that if modules are fsdp wrapped, they can be wrapped in act chpt; otherwise it doesn't work.
-            if isinstance(module, (GPTMLPMoE, MOELayer, FusedExpertsNetwork)):
+            if isinstance(module, (GPTMLPMoE, MOELayer)):
                 return False
             wrapable_cls = (
                 TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
-                TopKGate,
+                TopKGate
             )
             return isinstance(module, wrapable_cls)
 
@@ -644,8 +644,12 @@ class ComposerMosaicGPT(ComposerModel):
             for n, m in self.named_modules():
                 # pretty bad way to identify MoE layer, but it is what it is...
                 if n[-len('.moe'):] == '.moe':
+                    num_local_experts = m.expert.num_local_experts
+                    num_shards = m.expert.num_shards
+                    num_global_experts = m.expert.num_global_experts
+
                     _n_params_expert = sum(p.numel() for _n, p in m.named_parameters() if 'expert' in _n)
-                    n_params_experts += _n_params_expert // m.num_local_experts * m.sharded_count * m.num_global_experts
+                    n_params_experts += _n_params_expert // num_local_experts * num_shards * num_global_experts
 
             n_params_other = sum(p.numel() for n, p in self.named_parameters() if 'expert' not in n)
             print(f'{n_params_other=}; {n_params_experts=}')
@@ -667,9 +671,11 @@ class ComposerMosaicGPT(ComposerModel):
                 if n[-len('.moe'):] == '.moe':
                     gate_k = m.gate.top_k
                     capacity_factor = m.gate.capacity_factor
+                    num_local_experts = m.expert.num_local_experts
+                    num_shards = m.expert.num_shards
 
                     _n_params_expert_active = sum(p.numel() for _n, p in m.named_parameters() if 'expert' in _n)
-                    _n_params_expert_active = gate_k * _n_params_expert_active // m.num_local_experts * m.sharded_count
+                    _n_params_expert_active = gate_k * _n_params_expert_active // num_local_experts * num_shards
                     # artificially inflate to account for additional flops due to capacity factor
                     n_params_expert_active += capacity_factor * _n_params_expert_active
 
