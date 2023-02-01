@@ -251,7 +251,7 @@ class GPTMLPMoE(nn.Module):
                 device=device,
                 dtype=None,
             )
-        expert.batched_fc2_weight._is_residual = True  # type: ignore
+            expert.batched_fc2_weight._is_residual = True  # type: ignore
 
         gate = LinearTopKGate(
             in_features=cfg.d_model,
@@ -513,12 +513,6 @@ class MosaicGPT(nn.Module):
             if module.out_proj.bias is not None:
                 torch.nn.init.zeros_(module.out_proj.bias)
 
-        if isinstance(module, MOELayer):
-            # set buffer
-            # local_expert = -module.sharded_count if module.sharded_count > 1 else module.num_local_experts
-            # module._num_global_experts = torch.tensor(module.global_expert_count(local_expert, module.group))
-            pass
-
         if isinstance(module, FusedExpertsNetwork):
             # although the module is supposed to be ignored by FSDP,
             # model.apply will still run param_init_fn on the entire model
@@ -545,46 +539,33 @@ class MosaicGPT(nn.Module):
             # Linear handeled by nn.Linear
             pass
 
-    # FSDP Wrap function
-    def fsdp_wrap_fn(self, module):
-        # return isinstance(module, GPTBlock)
-        if not self.cfg.get('moe', None):
-            return isinstance(module, GPTBlock)
-        else:
-            # MoE wrapping fn
-            # modules not wrapped:
-            #   FusedExpertsNetwork: sharding handled by tutel
-            #                        this helps guarentee FSDP does not touch these weights
-            #                        experts are part of GPTMLPMoE to it is excluded as well
-            #   nn.Embedding: weights are shared with output embedding layer and must be
-            #                 handled as part of the main model
-            #   nn.LayerNorm: such a small portion of weights that they can be part of any
-            #                 block including the main model fsdp block
-            #   nn.Linear: already part of GPTMLP, Attnetion layer or gate layer
-            #   every other type of layer not in model
-            if isinstance(module, (GPTMLPMoE, MOELayer)):
-                return False
-            wrapable_cls = (
-                TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
-                TopKGate,
-            )
-            return isinstance(module, wrapable_cls)
+    # custom FSDP wrapping to enable MoE expert sharding
+    @staticmethod
+    def fsdp_custom_wrap(model, fsdp_kwargs):
+        from torch.distributed.fsdp import FullyShardedDataParallel
+
+        # first wrap experts
+        for n, m in model.named_modules():
+            if hasattr(m, "expert"):
+                # WARNING: tutel handles its own sharding so we just set the current rank.
+                # MoE implementations which require an outside library to handle expert sharding,
+                # we need to explicitly pass all ranks participating in the MoE expert shard.
+                ranks = [dist.get_global_rank()]
+                m.expert = FullyShardedDataParallel(
+                    m.expert,
+                    process_group=torch.distributed.new_group(ranks=ranks), # TODO (other args: timeout=default_pg_timeout, backend=None, pg_options=None)
+                    **fsdp_kwargs
+                )
+
+        # wrap GPTBlock
+        for n, m in model.named_modules():
+            if hasattr(m, "blocks"):
+                for i in range(len(m.blocks)):
+                    m.blocks[i] = FullyShardedDataParallel(m.blocks[i], **fsdp_kwargs)
 
     # Activation Checkpointing
     def activation_checkpointing_fn(self, module):
-        # return isinstance(module, GPTBlock)
-        if not self.cfg.get('moe', None):
-            return isinstance(module, GPTBlock)
-        else:
-            # MoE wrapping fn mirorring the fsdp module wrapping
-            # I think that if modules are fsdp wrapped, they can be wrapped in act chpt; otherwise it doesn't work.
-            if isinstance(module, (GPTMLPMoE, MOELayer)):
-                return False
-            wrapable_cls = (
-                TorchCausalAttention, FlashCausalAttention, TritonFlashCausalAttention, GPTMLP,
-                TopKGate
-            )
-            return isinstance(module, wrapable_cls)
+        return isinstance(module, GPTBlock)
 
 
 class ComposerMosaicGPT(ComposerModel):

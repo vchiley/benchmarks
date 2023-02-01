@@ -100,9 +100,6 @@ def main(cfg):
     print(f'{cfg.n_params=:.2e}')
     if hasattr(model, 'num_fwd_flops'):
         print(f'{model.num_fwd_flops=:.2e}')
-    
-    if fsdp_config is not None and cfg.model.get('moe', None) is not None:
-        fsdp_config['ignored_modules'] = [m for n, m in model.named_modules() if 'expert' in n]
 
     # Dataloaders
     print('Building train loader...')
