@@ -136,13 +136,14 @@ def _fwd_kernel(
         offs_n[:, None] * stride_kn + offs_d[None, :])
     v_ptrs = V + off_b * stride_vb + off_h * stride_vh + (
         offs_n[:, None] * stride_vn + offs_d[None, :])
-    if BIAS_TYPE == 'vector':
-        b_ptrs = Bias + off_b * stride_bb + off_h * stride_bh + offs_n
-    elif BIAS_TYPE == 'matrix':
-        b_ptrs = Bias + off_b * stride_bb + off_h * stride_bh + (
-            offs_m[:, None] * stride_bm + offs_n[None, :])
-    else:
-        raise ValueError("BIAS_TYPE must be one of {'vector', 'matrix'}")
+    if BIAS_TYPE != 'none':
+        if BIAS_TYPE == 'vector':
+            b_ptrs = Bias + off_b * stride_bb + off_h * stride_bh + offs_n
+        elif BIAS_TYPE == 'matrix':
+            b_ptrs = Bias + off_b * stride_bb + off_h * stride_bh + (
+                offs_m[:, None] * stride_bm + offs_n[None, :])
+        else:
+            raise ValueError("BIAS_TYPE must be one of {'vector', 'matrix'}")
     # initialize pointer to m and l
     t_ptrs = TMP + off_hb * seqlen_q_rounded + offs_m
     lse_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float('inf')
@@ -379,12 +380,13 @@ def _bwd_kernel_one_col_block(
     v_ptrs = V + (offs_n[:, None] * stride_vn + offs_d[None, :])
     do_ptrs = DO + (offs_qm[:, None] * stride_dom + offs_d[None, :])
     dq_ptrs = DQ + (offs_qm[:, None] * stride_dqm + offs_d[None, :])
-    if BIAS_TYPE == 'vector':
-        b_ptrs = Bias + offs_n
-    elif BIAS_TYPE == 'matrix':
-        b_ptrs = Bias + (offs_qm[:, None] * stride_bm + offs_n[None, :])
-    else:
-        raise ValueError("BIAS_TYPE must be one of {'vector', 'matrix'}")
+    if BIAS_TYPE != 'none':
+        if BIAS_TYPE == 'vector':
+            b_ptrs = Bias + offs_n
+        elif BIAS_TYPE == 'matrix':
+            b_ptrs = Bias + (offs_qm[:, None] * stride_bm + offs_n[None, :])
+        else:
+            raise ValueError("BIAS_TYPE must be one of {'vector', 'matrix'}")
     # initialize dv and dk
     dv = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
     dk = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
@@ -781,9 +783,8 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
     assert q.is_cuda and k.is_cuda and v.is_cuda
     softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
 
-    has_bias = bias is not None
     bias_type = 'none'
-    if has_bias:
+    if bias is not None:
         assert bias.dtype in [q.dtype, torch.float]
         assert bias.is_cuda
         assert bias.dim() == 4
@@ -806,9 +807,9 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
         assert bias.shape[:2] == (
             batch, nheads
         ), f'First 2 dimensions of bias must be broadcastible to (batch, nheads) = ({batch, nheads}). Bias has shape: {bias.shape}'
-    assert bias is not None  # for type checking
-    bias_strides = (bias.stride(0), bias.stride(1),
-                    bias.stride(2)) if has_bias else (0, 0, 0)
+    bias_strides = (0, 0, 0)
+    if bias is not None:
+        bias_strides = (bias.stride(0), bias.stride(1), bias.stride(2))
 
     seqlen_q_rounded = math.ceil(seqlen_q / 128) * 128
     lse = torch.empty((batch, nheads, seqlen_q_rounded),
@@ -913,9 +914,8 @@ def _flash_attn_backward(do,
         BLOCK_HEADDIM=BLOCK_HEADDIM,
     )
 
-    has_bias = bias is not None
     bias_type = 'none'
-    if has_bias:
+    if bias is not None:
         assert bias.dtype in [q.dtype, torch.float]
         assert bias.is_cuda
         assert bias.dim() == 4
@@ -937,9 +937,9 @@ def _flash_attn_backward(do,
         assert bias.shape[:2] == (
             batch, nheads
         ), f'First 2 dimensions of bias must be broadcastible to (batch, nheads) = ({batch, nheads}). Bias has shape: {bias.shape}'
-    assert bias is not None  # type checking
-    bias_strides = (bias.stride(0), bias.stride(1),
-                    bias.stride(2)) if has_bias else (0, 0, 0)
+    bias_strides = (0, 0, 0)
+    if bias is not None:
+        bias_strides = (bias.stride(0), bias.stride(1), bias.stride(2))
 
     # BLOCK_M = 128
     # BLOCK_N = 64

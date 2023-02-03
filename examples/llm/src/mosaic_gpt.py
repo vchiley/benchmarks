@@ -155,23 +155,25 @@ class TritonFlashCausalAttention(nn.Module):
 
     @staticmethod
     def mask_shape(n_heads, seq_len, alibi):
-        return (1, n_heads, 1, seq_len) if alibi else (1, 1, 1, seq_len)
+        return (1, n_heads, 1, seq_len) if alibi else None
 
     @staticmethod
     def attn_mask_(attn_mask, n_heads, seq_len, alibi=False, alibi_bias_max=8):
-        # in-place fill causal attn mask
-        attn_mask.zero_()
+        if attn_mask is not None:
+            # in-place fill causal attn mask
+            attn_mask.zero_()
 
-        if alibi:
-            device, dtype = attn_mask.device, attn_mask.dtype
-            attn_mask.add_(
-                alibi_bias(n_heads,
-                           seq_len,
-                           full=False,
-                           alibi_bias_max=alibi_bias_max,
-                           device=device,
-                           dtype=dtype))
+            if alibi:
+                device, dtype = attn_mask.device, attn_mask.dtype
+                attn_mask.add_(
+                    alibi_bias(n_heads,
+                            seq_len,
+                            full=False,
+                            alibi_bias_max=alibi_bias_max,
+                            device=device,
+                            dtype=dtype))
 
+            return attn_mask
         return attn_mask
 
 
@@ -299,7 +301,7 @@ class MosaicGPT(nn.Module):
         mask_shape = self.causal_attn_cls.mask_shape(cfg.n_heads,
                                                      cfg.max_seq_len,
                                                      self.alibi)
-        if mask_shape:
+        if mask_shape is not None:
             self.register_buffer('attn_mask',
                                  torch.empty(mask_shape, device=cfg.device))
         else:
@@ -320,7 +322,7 @@ class MosaicGPT(nn.Module):
                 return any(vals != num_valid_tokens)
         return False
 
-    def _attn_mask(self, batch_size=None, seq_len=None, key_padding_mask=None):
+    def _attn_mask(self, batch_size=None, seq_len=None, key_padding_mask=None, dtype=None):
         if not self._attn_mask_initialized:
             self.causal_attn_cls.attn_mask_(self.attn_mask,
                                             self.cfg.n_heads,
@@ -332,16 +334,25 @@ class MosaicGPT(nn.Module):
         if self.cfg.attn_impl == 'flash':
             return self.attn_mask  # None
 
-        # select seq_len subset of attn mask
-        assert self.attn_mask is not None, 'Internal logic error'
-        attn_mask = self.attn_mask[..., :seq_len, :seq_len]
+        attn_mask = None
 
         if self.cfg.attn_impl == 'triton' and self._check_apply_key_padding_mask(key_padding_mask):
+            mask_shape = (batch_size, 1, 1, seq_len)
+
+            if self.attn_mask is not None:
+                attn_mask = self.attn_mask[..., :seq_len, :seq_len]
+            else:
+                attn_mask = key_padding_mask.zeros(mask_shape, dtype=dtype)
+
             attn_mask = attn_mask.masked_fill(
-                ~key_padding_mask.view(batch_size, 1, 1, seq_len),
+                ~key_padding_mask.view(*mask_shape),
                 float('-inf'))
 
         if self.cfg.attn_impl == 'torch':
+            # select seq_len subset of attn mask
+            assert self.attn_mask is not None, 'Internal logic error'
+            attn_mask = self.attn_mask[..., :seq_len, :seq_len]
+
             if self._check_apply_key_padding_mask(key_padding_mask):
                 attn_mask = attn_mask.expand(batch_size, self.cfg.n_heads,
                                              seq_len, seq_len).clone()
@@ -388,7 +399,8 @@ class MosaicGPT(nn.Module):
 
         attn_mask = self._attn_mask(batch_size=B,
                                     seq_len=S,
-                                    key_padding_mask=key_padding_mask)
+                                    key_padding_mask=key_padding_mask,
+                                    dtype=x.dtype)
         for block in self.transformer.blocks:  # type: ignore
             x = block(
                 x, None if self.cfg.attn_impl == 'triton' else key_padding_mask,
