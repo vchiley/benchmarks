@@ -309,7 +309,11 @@ class MosaicGPT(nn.Module):
         if key_padding_mask is not None:
             if key_padding_mask.bool().logical_not().any():
                 # check to verify all tokens after the first invalid tokens are invalid.
+                # if there are no valid tokens after the first invalid token,
+                # key_padding_mask isn't required given causal mask will eliminate
+                # unwanted token interaction.
                 # WARNING: this approach only works for right padded causal attn
+                # NOTE: I chose this algorithm given its vectorized; there is room for improvement...
                 c_sum = key_padding_mask.cumsum(1)
                 num_valid_tokens = c_sum[:, -1].long()
                 vals = c_sum[range(key_padding_mask.size(0)), num_valid_tokens - 1]
