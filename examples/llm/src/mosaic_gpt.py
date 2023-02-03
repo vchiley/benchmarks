@@ -305,6 +305,17 @@ class MosaicGPT(nn.Module):
         else:
             self.attn_mask = None
 
+    def _check_apply_key_padding_mask(self, key_padding_mask):
+        if key_padding_mask is not None:
+            if key_padding_mask.bool().logical_not().any():
+                # check to verify all tokens after the first invalid tokens are invalid.
+                # WARNING: this approach only works for right padded causal attn
+                c_sum = key_padding_mask.cumsum(1)
+                num_valid_tokens = c_sum[:, -1].long()
+                vals = c_sum[range(key_padding_mask.size(0)), num_valid_tokens - 1]
+                return any(vals != num_valid_tokens)
+        return False
+
     def _attn_mask(self, batch_size=None, seq_len=None, key_padding_mask=None):
         if not self._attn_mask_initialized:
             self.causal_attn_cls.attn_mask_(self.attn_mask,
@@ -321,15 +332,13 @@ class MosaicGPT(nn.Module):
         assert self.attn_mask is not None, 'Internal logic error'
         attn_mask = self.attn_mask[..., :seq_len, :seq_len]
 
-        if self.cfg.attn_impl == 'triton' and key_padding_mask is not None and key_padding_mask.bool(
-        ).logical_not().any():
+        if self.cfg.attn_impl == 'triton' and self._check_apply_key_padding_mask(key_padding_mask):
             attn_mask = attn_mask.masked_fill(
                 ~key_padding_mask.view(batch_size, 1, 1, seq_len),
                 float('-inf'))
 
         if self.cfg.attn_impl == 'torch':
-            if key_padding_mask is not None and key_padding_mask.bool(
-            ).logical_not().any():
+            if self._check_apply_key_padding_mask(key_padding_mask):
                 attn_mask = attn_mask.expand(batch_size, self.cfg.n_heads,
                                              seq_len, seq_len).clone()
                 attn_mask.masked_fill_(
