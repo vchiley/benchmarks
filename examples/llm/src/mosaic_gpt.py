@@ -20,11 +20,13 @@ from composer.utils import get_device, dist
 from omegaconf import DictConfig
 from omegaconf.listconfig import ListConfig
 
-from .mosaic_moe.moe_layer import MOELayer
-from .mosaic_moe.gates.top import TopKGate, LinearTopKGate
-from .mosaic_moe.experts.ffn import FusedExpertsNetwork
+# from .mosaic_moe.moe_layer import MOELayer
+# from .mosaic_moe.gates.top import TopKGate, LinearTopKGate
+# from .mosaic_moe.experts.ffn import FusedExpertsNetwork
 
 from .mosaic_moe.experts.utils import SeedContextManager
+
+from deepspeed import moe
 
 
 class TorchCausalAttention(nn.Module):
@@ -232,44 +234,27 @@ class GPTMLPMoE(nn.Module):
         if isinstance(num_experts, ListConfig):
             # enables pyramid moe
             num_experts = num_experts[block_idx]
+        world_size = dist.get_world_size()
+        num_local_experts = num_experts // world_size or 1
 
         rank_seed = torch.initial_seed() + dist.get_global_rank()
         with SeedContextManager(gpu_devices=[torch.cuda.current_device()], seed=rank_seed) as s_ctx_mgr:
-            expert = FusedExpertsNetwork(
-                in_features=cfg.d_model,
-                hidden_features=cfg.mlp_ratio * cfg.d_model,
-                num_global_experts=num_experts,
-                out_features=cfg.d_model,
-                bias=True,
-                activation_fn=lambda x: F.gelu(x, approximate='none'),
-                a2a_ffn_overlap_degree=cfg.moe.get('a2a_ffn_overlap_degree', 1),
-                is_postscore=cfg.moe.get('is_postscore', True),
-                parallel_type=cfg.moe.get('parallel_type', 'auto'),
-                use_2dh=cfg.moe.get('use_2dh', False),
-                group=cfg.moe.get('group', None),
-                scan_expert_func=lambda name, param: setattr(param, '_moe_expert', True),
-                device=device,
-                dtype=None,
-            )
-            expert.batched_fc2_weight._is_residual = True  # type: ignore
-
-        gate = LinearTopKGate(
-            in_features=cfg.d_model,
-            num_global_experts=num_experts,
-            k=cfg.moe.get('gate_k', 1),
-            fp32_gate=cfg.moe.get('fp32_gate', True),
-            capacity_factor=cfg.moe.get('capacity_factor', 1.),
-            gate_noise=cfg.moe.get('gate_noise', 0.),
-            inequivalent_tokens=cfg.moe.get('inequivalent_tokens', False),
-            batch_prioritized_routing=cfg.moe.get('batch_prioritized_routing', False),
-            normalize_gate=cfg.moe.get('normalize_gate', True),
-            is_gshard_loss=cfg.moe.get('is_gshard_loss', True),
-            group=expert.group,
-            device=device,
-            dtype=None,
-        )
-
-        self.moe = MOELayer(gate=gate, expert=expert)
+            expert = GPTMLP(cfg, device=device)
+            
+        self.moe = moe.layer.MoE(cfg.d_model,
+                                 expert,
+                                 num_experts=num_local_experts,
+                                 ep_size=world_size // num_experts or 1,
+                                 k=1,
+                                 capacity_factor=1.,
+                                 eval_capacity_factor=1.,
+                                 min_capacity=4,
+                                 use_residual=False,
+                                 noisy_gate_policy=None,
+                                 drop_tokens=True,
+                                 use_rts=True,
+                                 use_tutel=False,
+                                 enable_expert_tensor_parallelism=False)
 
     def forward(self, x):
         return self.moe(x)
@@ -513,31 +498,31 @@ class MosaicGPT(nn.Module):
             if module.out_proj.bias is not None:
                 torch.nn.init.zeros_(module.out_proj.bias)
 
-        if isinstance(module, FusedExpertsNetwork):
-            # although the module is supposed to be ignored by FSDP,
-            # model.apply will still run param_init_fn on the entire model
-            # so FusedExpertsNetwork must be initialized here
+        # if isinstance(module, FusedExpertsNetwork):
+        #     # although the module is supposed to be ignored by FSDP,
+        #     # model.apply will still run param_init_fn on the entire model
+        #     # so FusedExpertsNetwork must be initialized here
 
-            # guarentee init seeds are different for all devices
-            # SeedContextManager sets the given seed, then restore local when finished
-            rank_seed = torch.initial_seed() + dist.get_global_rank()
-            with SeedContextManager(module.batched_fc1_weight, module.batched_fc2_weight, seed=rank_seed) as s_ctx_mgr:
-                if self.cfg.get('init_experts', False):
-                    init_fn(module.batched_fc1_weight)
-                    module.batched_fc2_weight.data.normal_(
-                        mean=0.0,
-                        std=(self.cfg.init_std / math.sqrt(2 * self.cfg.n_layers)))
-                else:
-                    # use default linear init since that is what is used by tutel
-                    # still zero init bias)
-                    torch.nn.init.kaiming_uniform_(module.batched_fc1_weight, a=math.sqrt(5))
-                    torch.nn.init.kaiming_uniform_(module.batched_fc2_weight, a=math.sqrt(5))
-            torch.nn.init.zeros_(module.batched_fc1_bias)
-            torch.nn.init.zeros_(module.batched_fc2_bias)
+        #     # guarentee init seeds are different for all devices
+        #     # SeedContextManager sets the given seed, then restore local when finished
+        #     rank_seed = torch.initial_seed() + dist.get_global_rank()
+        #     with SeedContextManager(module.batched_fc1_weight, module.batched_fc2_weight, seed=rank_seed) as s_ctx_mgr:
+        #         if self.cfg.get('init_experts', False):
+        #             init_fn(module.batched_fc1_weight)
+        #             module.batched_fc2_weight.data.normal_(
+        #                 mean=0.0,
+        #                 std=(self.cfg.init_std / math.sqrt(2 * self.cfg.n_layers)))
+        #         else:
+        #             # use default linear init since that is what is used by tutel
+        #             # still zero init bias)
+        #             torch.nn.init.kaiming_uniform_(module.batched_fc1_weight, a=math.sqrt(5))
+        #             torch.nn.init.kaiming_uniform_(module.batched_fc2_weight, a=math.sqrt(5))
+        #     torch.nn.init.zeros_(module.batched_fc1_bias)
+        #     torch.nn.init.zeros_(module.batched_fc2_bias)
 
-        if isinstance(module, TopKGate):
-            # Linear handeled by nn.Linear
-            pass
+        # if isinstance(module, TopKGate):
+        #     # Linear handeled by nn.Linear
+        #     pass
 
     # custom FSDP wrapping to enable MoE expert sharding
     @staticmethod
