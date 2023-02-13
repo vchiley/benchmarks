@@ -116,6 +116,49 @@ class FlashCausalAttention(nn.Module):
         return None
 
 
+class FlashCausalMHA(nn.Module):
+
+    def __init__(self, cfg: DictConfig, device: Optional[str] = None):
+        super().__init__()
+        try:
+            from flash_attn.modules.mha import MHA  # type: ignore
+        except ImportError as e:
+            raise e
+
+        self.mhsa = MHA(
+            embed_dim=cfg.d_model,
+            num_heads=cfg.n_heads,
+            # cross_attn=False,
+            bias=True,
+            dropout=cfg.attn_pdrop,
+            softmax_scale=None,
+            causal=True,
+            layer_idx=None,
+            dwconv=False,
+            rotary_emb_dim=cfg.get('rotary_emb_dim', 0),
+            rotary_emb_scale_base=cfg.get('rotary_emb_scale_base', 0),
+            fused_bias_fc=False,
+            use_flash_attn=True,
+            return_residual=False,
+            checkpointing=False,
+            device=device,
+            dtype=None
+        )
+        self.mhsa.out_proj._is_residual = True
+
+    def forward(self, x, key_padding_mask, attn_mask=None):
+        assert attn_mask is None
+        return self.mhsa(x, key_padding_mask=key_padding_mask), None
+
+    @staticmethod
+    def mask_shape(*args, **kwargs):
+        return None
+
+    @staticmethod
+    def attn_mask_(*args, **kwargs):
+        return None
+
+
 class TritonFlashCausalAttention(nn.Module):
     """Multi-headed self attention using triton FlashAttn kernel.
 
@@ -259,6 +302,8 @@ class MosaicGPT(nn.Module):
             self.causal_attn_cls = TorchCausalAttention
         elif cfg.attn_impl == 'flash':
             self.causal_attn_cls = FlashCausalAttention
+        elif cfg.attn_impl == 'flashmha':
+            self.causal_attn_cls = FlashCausalMHA
         elif cfg.attn_impl == 'triton':
             self.causal_attn_cls = TritonFlashCausalAttention
         else:
@@ -267,6 +312,20 @@ class MosaicGPT(nn.Module):
         self.alibi = cfg.get('alibi', False)
         self.alibi_bias_max = cfg.get('alibi_bias_max',
                                       8 if self.alibi else None)
+
+        self.rotary_emb = bool(cfg.get('rotary_emb_dim', None))
+        try:
+            import rotary_emb
+            del rotary_emb
+        except e:
+            print(
+                'RoPE requires `pip install .` from: '
+                'https://github.com/HazyResearch/flash-attention/tree/main/csrc/rotary'
+            )
+            raise e
+        if self.rotary_emb and cfg.attn_impl != 'flashmha':
+            raise NotImplementedError(f'RoPE not implemented for {cfg.attn_impl}')
+
         # CogView (https://arxiv.org/abs/2105.13290) and GLM-130B (https://arxiv.org/abs/2210.02414)
         # both report this helping with stabilizing training
         self.embedding_fraction = cfg.get('embedding_fraction', 1)
@@ -278,7 +337,7 @@ class MosaicGPT(nn.Module):
                              cfg.d_model,
                              device=cfg.init_device)
         })
-        if not self.alibi:
+        if not (self.alibi or self.rotary_emb):
             self.transformer.update({
                 'wpe':
                     nn.Embedding(cfg.max_seq_len,
@@ -400,7 +459,7 @@ class MosaicGPT(nn.Module):
         ), f'Cannot forward input with seq_len={S}, this model only supports seq_len<={self.cfg.max_seq_len}'
 
         tok_emb = self.transformer.wte(input_ids)  # type: ignore
-        if self.alibi:
+        if self.alibi or self.rotary_emb:
             x = tok_emb
         else:
             pos = torch.arange(0, S, dtype=torch.long,
