@@ -135,7 +135,8 @@ class TritonFlashCausalAttention(nn.Module):
         self.mhsa = FlashMHA(
             embed_dim=cfg.d_model,
             num_heads=cfg.n_heads,
-            bias=True,
+            qkv_bias=cfg.get('qkv_bias', True),
+            out_proj_bias=True,
             batch_first=True,
             causal=True,
             device=device,
@@ -264,6 +265,8 @@ class MosaicGPT(nn.Module):
         else:
             raise ValueError(f'Unknown attn_impl={cfg.attn_impl}')
 
+        if cfg.get('qkv_bias', True) is False and cfg.attn_impl != 'triton':
+            raise NotImplementedError("Disabling qkv_bias only enabled for cfg.attn_impl != 'triton'")
         self.alibi = cfg.get('alibi', False)
         self.alibi_bias_max = cfg.get('alibi_bias_max',
                                       8 if self.alibi else None)

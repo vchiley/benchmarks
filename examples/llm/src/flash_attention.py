@@ -97,7 +97,8 @@ class FlashMHA(nn.Module):
     def __init__(self,
                  embed_dim,
                  num_heads,
-                 bias=True,
+                 qkv_bias=True,
+                 out_proj_bias=True,
                  batch_first=True,
                  causal=False,
                  device=None,
@@ -116,14 +117,14 @@ class FlashMHA(nn.Module):
 
         self.Wqkv = nn.Linear(embed_dim,
                               3 * embed_dim,
-                              bias=bias,
+                              bias=qkv_bias,
                               **factory_kwargs)
         self.inner_attn = FlashAttention(num_heads=num_heads,
                                          softmax_scale=None,
                                          **factory_kwargs)
         self.out_proj = nn.Linear(embed_dim,
                                   embed_dim,
-                                  bias=bias,
+                                  bias=out_proj_bias,
                                   **factory_kwargs)
 
     def forward(self,
