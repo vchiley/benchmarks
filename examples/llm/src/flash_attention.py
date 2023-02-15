@@ -148,11 +148,13 @@ class FlashMHA(nn.Module):
                 Default: ``True``.
         """
         qkv = self.Wqkv(x)
-        context, attn_weights = self.inner_attn(
+        context, attn_weights = torch.utils.checkpoint.checkpoint(
+            self.inner_attn,
             qkv,
-            key_padding_mask=key_padding_mask,
-            attn_mask=attn_mask,
-            is_causal=self.causal,
-            need_weights=need_weights,
-            average_attn_weights=False)
+            key_padding_mask,
+            attn_mask,
+            self.causal,
+            need_weights,
+            False
+        )
         return self.out_proj(context), attn_weights
