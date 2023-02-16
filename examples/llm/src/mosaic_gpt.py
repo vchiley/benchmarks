@@ -57,6 +57,9 @@ class GeLUVFN(torch.autograd.Function):
             grad_y = grad_output
 
         grad_x = ctx.gelu_grad_fn(grad_y)
+        # make sure gelu_grad_fn gets deleted
+        # hopefully there's no mem leak using this weird method...
+        del ctx.gelu_grad_fn
 
         return grad_x, None, None
 
