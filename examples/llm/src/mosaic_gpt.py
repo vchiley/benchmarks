@@ -20,6 +20,60 @@ from composer.models.base import ComposerModel
 from omegaconf import DictConfig
 
 
+
+class GeLUVFN(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, approximate='none', clip_value=None):
+        with torch.set_grad_enabled(mode=True):
+            # my hack for caching gelu grad_fn
+            _x = x.clone().detach()
+            _x.requires_grad = True
+            y = F.gelu(_x, approximate=approximate)
+            ctx.gelu_grad_fn = y.grad_fn
+
+        out = y
+
+        ctx.clip_value = clip_value
+        if clip_value is not None:
+            # this adds two memory bound ops
+            # would be better to create the entire op in CUDA or triton
+            # but this is good as prototypes for now
+            # it also shouldn't matter as we scale
+
+            # we do this to avoid clamp_max_ caching the entire tensor (cuz its dumb...)
+            out = y.clamp_max_(clip_value)
+            mask = ~(out == clip_value)
+            ctx.save_for_backward(mask)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        clip_value = ctx.clip_value
+        if clip_value is not None:
+            mask, = ctx.saved_tensors
+            grad_y = grad_output * mask
+        else:
+            grad_y = grad_output
+
+        grad_x = ctx.gelu_grad_fn(grad_y)
+
+        return grad_x, None, None
+
+
+geluv = GeLUVFN.apply
+
+
+class GeLUV(nn.Module):
+    def __init__(self, approximate='none', clip_value=None):
+        super().__init__()
+        self.approximate = approximate
+        self.clip_value = clip_value
+    
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return geluv(input, self.approximate, self.clip_value)
+
+
 class TorchCausalAttention(nn.Module):
 
     def __init__(self, cfg: DictConfig, device: Optional[str] = None):
@@ -132,6 +186,10 @@ class TritonFlashCausalAttention(nn.Module):
 
         assert cfg.attn_pdrop == 0, 'triton kernel does not support attn_dropout'
 
+        act = None
+        if cfg.get('attn_act'):
+            act = GeLUV(approximate='none', clip_value=cfg.get('act_clip_val'))
+
         self.mhsa = FlashMHA(
             embed_dim=cfg.d_model,
             num_heads=cfg.n_heads,
@@ -139,6 +197,7 @@ class TritonFlashCausalAttention(nn.Module):
             batch_first=True,
             causal=True,
             device=device,
+            act=act,
         )
         self.mhsa.out_proj._is_residual = True  # type: ignore
 
@@ -208,7 +267,8 @@ class GPTMLP(nn.Module):
         self.mlp_up = nn.Linear(cfg.d_model,
                                 cfg.mlp_ratio * cfg.d_model,
                                 device=device)
-        self.mlp_act = nn.GELU(approximate='none')
+        self.mlp_act = GeLUV(approximate='none', clip_value=cfg.get('act_clip_val'))
+        # self.mlp_act = nn.GELU(approximate='none')
         self.mlp_down = nn.Linear(cfg.mlp_ratio * cfg.d_model,
                                   cfg.d_model,
                                   device=device)
@@ -267,6 +327,8 @@ class MosaicGPT(nn.Module):
         self.alibi = cfg.get('alibi', False)
         self.alibi_bias_max = cfg.get('alibi_bias_max',
                                       8 if self.alibi else None)
+        if cfg.get('attn_act') and cfg.attn_impl != 'triton':
+            raise NotImplementedError(f'{cfg.get("attn_act")} as attn_act not implemented for {cfg.attn_impl=}')
         # CogView (https://arxiv.org/abs/2105.13290) and GLM-130B (https://arxiv.org/abs/2210.02414)
         # both report this helping with stabilizing training
         self.embedding_fraction = cfg.get('embedding_fraction', 1)

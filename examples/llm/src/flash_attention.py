@@ -102,6 +102,7 @@ class FlashMHA(nn.Module):
                  causal=False,
                  device=None,
                  dtype=None,
+                 act=None,
                  **kwargs) -> None:
         assert batch_first
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -118,6 +119,8 @@ class FlashMHA(nn.Module):
                               3 * embed_dim,
                               bias=bias,
                               **factory_kwargs)
+        if act is not None:
+            self.act = act
         self.inner_attn = FlashAttention(num_heads=num_heads,
                                          softmax_scale=None,
                                          **factory_kwargs)
@@ -148,6 +151,8 @@ class FlashMHA(nn.Module):
                 Default: ``True``.
         """
         qkv = self.Wqkv(x)
+        if self.act is not None:
+            qkv = self.act(qkv)
         context, attn_weights = self.inner_attn(
             qkv,
             key_padding_mask=key_padding_mask,
