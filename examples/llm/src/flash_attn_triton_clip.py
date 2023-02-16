@@ -43,6 +43,7 @@ import triton.language as tl
 
 
 HARDCODED_CLIP_VALUE = 42
+BWD_CLIP_STESTIMATE = False
 
 # Disabling autotune for now, set num_warps=4 if headdim=64 and num_warps=8 if headdim=128
 # @triton.autotune(
@@ -436,7 +437,7 @@ def _bwd_kernel_one_col_block(
         # Converting ds to q.dtype here reduces register pressure and makes it much faster
         # for BLOCK_HEADDIM=128
         ds = (p * (dp - Di[:, None]) * softmax_scale).to(q.dtype)
-        if HARDCODED_CLIP_VALUE is not None:
+        if BWD_CLIP_STESTIMATE and HARDCODED_CLIP_VALUE is not None:
             ds = tl.where(qk == HARDCODED_CLIP_VALUE, 0, ds)
             ds = ds.to(q.dtype)  # convert back to the appropriate dtype
         # compute dk = dot(ds.T, q)

@@ -198,7 +198,8 @@ class TritonFlashCausalAttention(nn.Module):
             causal=True,
             device=device,
             act=act,
-            attn_clip_val=cfg.get('attn_clip_val')
+            attn_clip_val=cfg.get('attn_clip_val'),
+            clip_stest=cfg.get('attn_clip_stest', False),
         )
         self.mhsa.out_proj._is_residual = True  # type: ignore
 

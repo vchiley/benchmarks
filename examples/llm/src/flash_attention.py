@@ -24,7 +24,7 @@ class FlashAttention(nn.Module):
                       runtime)
     """
 
-    def __init__(self, num_heads, softmax_scale=None, device=None, dtype=None, attn_clip_val=None):
+    def __init__(self, num_heads, softmax_scale=None, device=None, dtype=None, attn_clip_val=None, clip_stest=False):
         # fail fast if triton is not available
         # try:
         from flash_attn import flash_attn_triton  # type: ignore
@@ -43,6 +43,7 @@ class FlashAttention(nn.Module):
         self.attn_clip_val = attn_clip_val
         if attn_clip_val:
             flash_attn_triton_clip.HARDCODED_CLIP_VALUE = attn_clip_val
+            flash_attn_triton_clip.BWD_CLIP_STESTIMATE = clip_stest
         self.flash_attn_qkvpacked_func_w_clip = flash_attn_triton_clip.FlashAttnQKVPackedFunc.apply
 
     def forward(
@@ -114,6 +115,7 @@ class FlashMHA(nn.Module):
                  dtype=None,
                  act=None,
                  attn_clip_val=None,
+                 clip_stest=False,
                  **kwargs) -> None:
         assert batch_first
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -134,6 +136,7 @@ class FlashMHA(nn.Module):
         self.inner_attn = FlashAttention(num_heads=num_heads,
                                          softmax_scale=None,
                                          attn_clip_val=attn_clip_val,
+                                         clip_stest=clip_stest,
                                          **factory_kwargs)
         self.out_proj = nn.Linear(embed_dim,
                                   embed_dim,
