@@ -198,6 +198,7 @@ class TritonFlashCausalAttention(nn.Module):
             causal=True,
             device=device,
             act=act,
+            attn_clip_val=cfg.get('attn_clip_val')
         )
         self.mhsa.out_proj._is_residual = True  # type: ignore
 
@@ -329,6 +330,8 @@ class MosaicGPT(nn.Module):
                                       8 if self.alibi else None)
         if cfg.get('attn_act') and cfg.attn_impl != 'triton':
             raise NotImplementedError(f'{cfg.get("attn_act")} as attn_act not implemented for {cfg.attn_impl=}')
+        if cfg.get('attn_clip_val') and cfg.attn_impl != 'triton':
+            raise NotImplementedError(f'Clipping attn with attn_clip_val not implemented for {cfg.attn_impl=}')
         # CogView (https://arxiv.org/abs/2105.13290) and GLM-130B (https://arxiv.org/abs/2210.02414)
         # both report this helping with stabilizing training
         self.embedding_fraction = cfg.get('embedding_fraction', 1)

@@ -24,20 +24,26 @@ class FlashAttention(nn.Module):
                       runtime)
     """
 
-    def __init__(self, num_heads, softmax_scale=None, device=None, dtype=None):
+    def __init__(self, num_heads, softmax_scale=None, device=None, dtype=None, attn_clip_val=None):
         # fail fast if triton is not available
-        try:
-            from flash_attn import flash_attn_triton  # type: ignore
+        # try:
+        from flash_attn import flash_attn_triton  # type: ignore
 
-            del flash_attn_triton
-        except ImportError:
-            raise ImportError(
-                'examples was installed without flash attention + triton support. Please make sure you are in an environment with CUDA available and pip install .[llm]'
-            )
+        del flash_attn_triton
+
+        from examples.llm.src import flash_attn_triton_clip  # type: ignore
+        # except ImportError:
+        #     raise ImportError(
+        #         'examples was installed without flash attention + triton support. Please make sure you are in an environment with CUDA available and pip install .[llm]'
+        #     )
 
         super().__init__()
         self.num_heads = num_heads
         self.softmax_scale = softmax_scale
+        self.attn_clip_val = attn_clip_val
+        if attn_clip_val:
+            flash_attn_triton_clip.HARDCODED_CLIP_VALUE = attn_clip_val
+        self.flash_attn_qkvpacked_func_w_clip = flash_attn_triton_clip.FlashAttnQKVPackedFunc.apply
 
     def forward(
             self,
@@ -86,8 +92,12 @@ class FlashAttention(nn.Module):
                 f'assumes key_padding_mask is taken care of by attn_mask')
         qkv = rearrange(qkv, 'b s (t h d) -> b s t h d', t=3, h=self.num_heads)
 
-        attn_output = flash_attn_triton.flash_attn_qkvpacked_func(
-            qkv, attn_mask, is_causal, self.softmax_scale)
+        if self.attn_clip_val:
+            attn_output = self.flash_attn_qkvpacked_func_w_clip(
+                qkv, attn_mask, is_causal, self.softmax_scale)
+        else:
+            attn_output = flash_attn_triton.flash_attn_qkvpacked_func(
+                qkv, attn_mask, is_causal, self.softmax_scale)
         output = rearrange(attn_output, 'b s h d -> b s (h d)')
         return output, None
 
@@ -103,6 +113,7 @@ class FlashMHA(nn.Module):
                  device=None,
                  dtype=None,
                  act=None,
+                 attn_clip_val=None,
                  **kwargs) -> None:
         assert batch_first
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -119,10 +130,10 @@ class FlashMHA(nn.Module):
                               3 * embed_dim,
                               bias=bias,
                               **factory_kwargs)
-        if act is not None:
-            self.act = act
+        self.act = act
         self.inner_attn = FlashAttention(num_heads=num_heads,
                                          softmax_scale=None,
+                                         attn_clip_val=attn_clip_val,
                                          **factory_kwargs)
         self.out_proj = nn.Linear(embed_dim,
                                   embed_dim,
