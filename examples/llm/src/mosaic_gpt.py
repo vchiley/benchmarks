@@ -20,6 +20,46 @@ from composer.models.base import ComposerModel
 from omegaconf import DictConfig
 
 
+class ClampFN(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, min=None, max=None):
+        ctx.min, ctx.max = min, max
+        if min is None and max is None:
+            return x
+
+        out = x.clamp_(min, max)
+        mask = 1
+        if min is not None:
+            mask *= ~(out == min)
+        if max is not None:
+            mask *= ~(out == max)
+        ctx.save_for_backward(mask.bool())
+
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        min, max = ctx.min, ctx.max
+        if min is None and max is None:
+            return grad_output, None, None
+        
+        mask, = ctx.saved_tensors
+        return grad_output * mask, None, None
+
+
+clamp = ClampFN.apply
+
+
+class Clamp(nn.Module):
+    def __init__(self, min=None, max=None):
+        super().__init__()
+        self.min = min
+        self.max = max
+    
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return clamp(input, self.min, self.max)
+
 
 class GeLUVFN(torch.autograd.Function):
 
@@ -193,6 +233,11 @@ class TritonFlashCausalAttention(nn.Module):
         if cfg.get('attn_act'):
             act = GeLUV(approximate='none', clip_value=cfg.get('act_clip_val'))
 
+        qkv_clip = None
+        if cfg.get('qkv_clip'):
+            cv = cfg.get('qkv_clip')
+            qkv_clip = Clamp(min=-cv, max=cv)
+
         self.mhsa = FlashMHA(
             embed_dim=cfg.d_model,
             num_heads=cfg.n_heads,
@@ -203,6 +248,7 @@ class TritonFlashCausalAttention(nn.Module):
             act=act,
             attn_clip_val=cfg.get('attn_clip_val'),
             clip_stest=cfg.get('attn_clip_stest', False),
+            qkv_clip=qkv_clip,
         )
         self.mhsa.out_proj._is_residual = True  # type: ignore
 
