@@ -128,7 +128,7 @@ class MosaicGPT(nn.Module):
     def forward(self,
                 input_ids: torch.LongTensor,
                 key_padding_mask: Optional[torch.ByteTensor] = None):
-        B, S = input_ids.size()
+        S = input_ids.size(1)
         assert (
             S <= self.cfg.max_seq_len
         ), f'Cannot forward input with seq_len={S}, this model only supports seq_len<={self.cfg.max_seq_len}'
