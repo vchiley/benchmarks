@@ -90,6 +90,8 @@ def main(cfg):
     cfg.dist_timeout = cfg.get('dist_timeout', 1800.0)
 
     reproducibility.seed_all(cfg.seed)
+    import torch
+    torch.use_deterministic_algorithms(True)
     dist.initialize_dist(get_device(None), timeout=cfg.dist_timeout)
 
     # Run Name
@@ -141,9 +143,6 @@ def main(cfg):
     if 'icl_tasks' in cfg:
         icl_evaluators, _ = build_icl_evaluators(cfg, model.tokenizer)
         evaluators.extend(icl_evaluators)
-
-    # testing
-    reproducibility.seed_all(cfg.seed)
 
     # Optimizer
     optimizer = build_optimizer(cfg.optimizer, model)
