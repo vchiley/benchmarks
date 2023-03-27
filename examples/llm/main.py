@@ -61,7 +61,9 @@ def build_composer_model(model_cfg, tokenizer_cfg):
     try:
         return COMPOSER_MODEL_REGISTRY[model_cfg.name](model_cfg, tokenizer_cfg)
     except:
-        raise ValueError(f'Not sure how to build model with name={cfg.name}')
+        raise ValueError(
+            f'Not sure how to build {model_cfg.name} model with {tokenizer_cfg.name} tokenizer'
+        )
 
 
 def build_dataloader(cfg, device_batch_size):
@@ -139,6 +141,9 @@ def main(cfg):
     if 'icl_tasks' in cfg:
         icl_evaluators, _ = build_icl_evaluators(cfg, model.tokenizer)
         evaluators.extend(icl_evaluators)
+
+    # testing
+    reproducibility.seed_all(cfg.seed)
 
     # Optimizer
     optimizer = build_optimizer(cfg.optimizer, model)
