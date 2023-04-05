@@ -251,7 +251,7 @@ Our microbatching engine enables microbatch sizes that do not divde Global Batch
 |  Model | SeqLen |        # GPUs |   HFU |   MFU | Throughput (T/s/GPU) |
 | ------ | ------ | ------------- | ----- | ----- | -------------------- |
 |    70b |   2048 | 64x A100 80GB | 71.10 | 53.33 |                  410 |
-|    30b |   8192 |  8x A100 80GB | 42.66 | 56.89 |                  622 |
+|    30b |   8192 |  8x A100 80GB | 56.89 | 42.66 |                  622 |
 |    30b |   2048 | 64x A100 80GB | 70.57 | 52.93 |                  876 |
 |    13b |  32768 |  8x A100 80GB | 66.04 | 49.53 |                  974 |
 |    13b |   2048 | 64x A100 80GB | 70.01 | 52.51 |                 1994 |
@@ -261,3 +261,33 @@ Our microbatching engine enables microbatch sizes that do not divde Global Batch
 |     3b |  65536 |  8x A100 80GB | 61.57 | 46.17 |                 1771 |
 |     3b |   2048 | 64x A100 80GB | 58.36 | 58.36 |                10158 |
 |     3b |    512 |  8x A100 80GB | 62.09 | 62.09 |                11819 |
+
+<!-- 
+53.33 | 71.10
+42.66 | 56.89
+52.93 | 70.57
+49.53 | 66.04
+52.51 | 70.01
+55.23 | 73.63
+42.61 | 56.82
+50.80 | 67.73
+46.17 | 61.57
+58.36 | 58.36
+62.09 | 62.09
+
+
+
+
+|  Model | SeqLen | # GPUs | GPU | MFU | HFU | MicroBatchSize | GradAccum | GlobalBatchSize | Throughput (S/s) | Throughput (T/s) | Throughput (T/s/GPU) | GlobalBatchSize (T) | Precision | MP Mode | Sharding Strategy | Activation Checkpointing | Activation CPUOffload | NumParams |
+|  --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  70b | 2048 | 64 | a100_80gb | 53.33 | 71.1 | 8 | 4 | 2048 | 12 | 26274 | 410 | 4194304 | bf16 | PURE | FULL_SHARD | True | False | 64862437376 |
+|  30b | 8192 | 8 | a100_80gb | 42.66 | 56.89 | 1 | 21 | 168 | 0 | 4977 | 622 | 1376256 | bf16 | PURE | FULL_SHARD | True | False | 30019254272 |
+|  30b | 2048 | 64 | a100_80gb | 52.93 | 70.57 | 16 | 3 | 3072 | 27 | 56126 | 876 | 6291456 | bf16 | PURE | FULL_SHARD | True | False | 29975214080 |
+|  13b | 32768 | 8 | a100_80gb | 49.53 | 66.04 | 1 | 3 | 24 | 0 | 7795 | 974 | 786432 | bf16 | PURE | FULL_SHARD | True | False | 13011240960 |
+|  13b | 2048 | 64 | a100_80gb | 52.51 | 70.01 | 32 | 1 | 2048 | 62 | 127624 | 1994 | 4194304 | bf16 | PURE | FULL_SHARD | True | False | 12853954560 |
+|  13b | 1024 | 8 | a100_80gb | 55.23 | 73.63 | 40 | 3 | 960 | 16 | 17315 | 2164 | 983040 | bf16 | PURE | FULL_SHARD | True | False | 12848711680 |
+|  7b | 65536 | 8 | a100_80gb | 42.61 | 56.82 | 1 | 2 | 16 | 0 | 7355 | 919 | 1048576 | bf16 | PURE | FULL_SHARD | True | False | 6918905856 |
+|  7b | 2048 | 64 | a100_80gb | 50.8 | 67.73 | 32 | 1 | 2048 | 114 | 234932 | 3670 | 4194304 | bf16 | PURE | FULL_SHARD | True | False | 6658859008 |
+|  3b | 65536 | 8 | a100_80gb | 46.17 | 61.57 | 1 | 2 | 16 | 0 | 14174 | 1771 | 1048576 | bf16 | PURE | FULL_SHARD | True | False | 2814366720 |
+|  3b | 2048 | 64 | a100_80gb | 58.36 | 58.36 | 12 | 3 | 2304 | 317 | 650175 | 10158 | 4718592 | bf16 | PURE | FULL_SHARD | False | False | 2651837
+|  3b | 512 | 8 | a100_80gb | 62.09 | 62.09 | 40 | 6 | 1920 | 184 | 94553 | 11819 | 983040 | bf16 | PURE | FULL_SHARD | False | False | 2647905280 | -->
