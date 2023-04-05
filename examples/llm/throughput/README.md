@@ -251,7 +251,9 @@ Our microbatching engine enables microbatch sizes that do not divde Global Batch
 |  Model | SeqLen |        # GPUs |   HFU |   MFU | Throughput (T/s/GPU) |
 | ------ | ------ | ------------- | ----- | ----- | -------------------- |
 |    70b |   2048 | 64x A100 80GB | 71.10 | 53.33 |                  410 |
+|    30b |   8192 |  8x A100 80GB | 42.66 | 56.89 |                  622 |
 |    30b |   2048 | 64x A100 80GB | 70.57 | 52.93 |                  876 |
+|    13b |  32768 |  8x A100 80GB | 66.04 | 49.53 |                  974 |
 |    13b |   2048 | 64x A100 80GB | 70.01 | 52.51 |                 1994 |
 |    13b |   1024 |  8x A100 80GB | 73.63 | 55.23 |                 2164 |
 |     7b |  65536 |  8x A100 80GB | 56.82 | 42.61 |                  919 |
