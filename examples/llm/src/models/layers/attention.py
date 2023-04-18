@@ -188,7 +188,8 @@ def triton_flash_attn_fn(
     needs_weights=False,
 ):
     try:
-        from flash_attn import flash_attn_triton  # type: ignore
+        # from flash_attn import flash_attn_triton  # type: ignore
+        from examples.llm.src.models.layers import triton_flash_attn as flash_attn_triton
     except ImportError as e:
         raise e
 

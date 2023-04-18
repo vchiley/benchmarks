@@ -5,7 +5,7 @@ mosaicml-streaming==0.4.0
 flash-attn==0.2.8
 mosaicml-cli>=0.2.32,<1
 # need a newer version of triton
-triton==2.0.0.dev20221202
+triton==2.0.0.post1 # @ git+https://github.com/openai/triton.git@e650d3708be4dca12cc3491a2f8ab18ded47c368  # ==2.0.0
 transformers==4.26.1
 omegaconf==2.2.3
 wandb==0.13.6
