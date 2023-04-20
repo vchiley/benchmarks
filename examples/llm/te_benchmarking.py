@@ -35,6 +35,8 @@ def build_composer_model(model_cfg, tokenizer_cfg, tensor_parallel_group=None):
 
 
 def test_throughput(rank, world_size):
+    torch.cuda.set_device(rank)
+
     # Filter deprecation warning from torch internal usage
     warnings.filterwarnings(
         action='ignore',
@@ -89,7 +91,7 @@ def test_throughput(rank, world_size):
 
     # construct DDP model
     if rank == 0: print(f'setting up DDP model')
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], process_group=data_parallel_group)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], output_device=rank, process_group=data_parallel_group)
     module = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
     # define optimizer
     if rank == 0: print(f'init optimizer')
