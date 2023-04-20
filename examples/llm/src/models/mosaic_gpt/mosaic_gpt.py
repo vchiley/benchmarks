@@ -41,7 +41,7 @@ class MosaicGPT(PreTrainedModel):
     config_class = MosaicGPTConfig
     base_model_prefix = 'mosaic_gpt'
 
-    def __init__(self, config: MosaicGPTConfig):
+    def __init__(self, config: MosaicGPTConfig, tensor_parallel_group = None):
         super().__init__(config)
 
         self.attn_impl = config.attn_impl
@@ -79,7 +79,12 @@ class MosaicGPT(PreTrainedModel):
                     num_attention_heads=config.n_heads,
                     layernorm_epsilon=1e-5,
                     attention_dropout=config.attn_pdrop,
-                    hidden_dropout=config.resid_pdrop) for _ in range(config.n_layers)])
+                    hidden_dropout=config.resid_pdrop,
+                    self_attn_mask_type='causal',
+                    set_parallel_mode=True,
+                    tp_group=tensor_parallel_group,
+                    sequence_parallel=True,
+                ) for _ in range(config.n_layers)])
         else:
             layers = nn.ModuleList([
                 gpt_blocks.GPTBlock(device=config.init_device,
@@ -367,9 +372,12 @@ class MosaicGPT(PreTrainedModel):
             # Transformer engine expects inputs in [seq_len, batch_size, hidden_size]
             # format and currently doesn't work if the input is not contiguous
             x = x.permute((1, 0, 2)).contiguous()
+            # print(x[0,0,:4])
             for block in self.transformer.blocks:  # type: ignore
                 x = block(x, attention_mask=None)
+                # print(x[0,0,:4])
             x = x.permute((1, 0, 2)).contiguous()
+            # print(x[0,0,:4])
         else:
             for b_idx, block in enumerate(self.transformer.blocks):  # type: ignore
                 if output_hidden_states:
@@ -481,11 +489,11 @@ class MosaicGPT(PreTrainedModel):
 class ComposerMosaicGPT(HuggingFaceModel):
 
     def __init__(self, om_model_config: DictConfig,
-                 om_tokenizer_config: DictConfig):
+                 om_tokenizer_config: DictConfig, tensor_parallel_group = None):
         resolved_om_model_config = om.to_container(om_model_config,
                                                    resolve=True)
         hf_config = MosaicGPTConfig.from_dict(resolved_om_model_config)
-        model = MosaicGPT(hf_config)
+        model = MosaicGPT(hf_config, tensor_parallel_group=tensor_parallel_group)
 
         resolved_om_tokenizer_config = om.to_container(om_tokenizer_config,
                                                        resolve=True)

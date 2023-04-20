@@ -28,7 +28,7 @@ class GPTMLP(nn.Module):
         super().__init__()
         if te_installed and te_linears:
              # init device is currently not supported with TransformerEngine
-             self.mlp_up = te.Linear(cfg.d_model, mlp_ratio * d_model)
+             self.mlp_up = te.Linear(d_model, mlp_ratio * d_model)
              self.mlp_down = te.Linear(mlp_ratio * d_model, d_model)
         else:
             self.mlp_up = nn.Linear(d_model, mlp_ratio * d_model, device=device)
@@ -71,6 +71,7 @@ class GPTBlock(nn.Module):
             attn_pdrop=attn_pdrop,
             d_model=d_model,
             n_heads=n_heads,
+            te_linears=te_linears,
             device=device,
         )
         self.ln_2 = layernorm_class(d_model, device=device)

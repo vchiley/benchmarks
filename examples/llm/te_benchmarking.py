@@ -9,14 +9,11 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-import torch.nn as nn
 import torch.optim as optim
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 from omegaconf import OmegaConf as om
 
-from examples.llm.src import (COMPOSER_MODEL_REGISTRY,
-                              build_text_denoising_dataloader)
+from examples.llm.src import COMPOSER_MODEL_REGISTRY
 
 try:
     import transformer_engine.pytorch as te
@@ -26,38 +23,18 @@ except ImportError:
     te_installed = False
 
 
-def build_composer_model(model_cfg, tokenizer_cfg):
+def build_composer_model(model_cfg, tokenizer_cfg, tensor_parallel_group=None):
     warnings.filterwarnings(
         action='ignore',
         message='Torchmetrics v0.9 introduced a new argument class property')
     try:
-        return COMPOSER_MODEL_REGISTRY[model_cfg.name](model_cfg, tokenizer_cfg)
+        return COMPOSER_MODEL_REGISTRY[model_cfg.name](model_cfg, tokenizer_cfg, tensor_parallel_group)
     except:
         raise ValueError(
             f'Not sure how to build model with name={model_cfg.name}')
 
 
 def test_throughput(rank, world_size):
-    # get configs
-    yaml_path, args_list = sys.argv[2], sys.argv[3:]
-    with open(yaml_path) as f:
-        yaml_cfg = om.load(f)
-    cli_cfg = om.from_cli(args_list)
-    cfg = om.merge(yaml_cfg, cli_cfg)
-
-    device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
-    cfg.model.te_tx_layer = False
-    if device_type == 'h100':
-        fp8_format = Format.HYBRID
-        fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max")
-
-        cfg.model.te_tx_layer = True
-        cfg.model.te_linears = False
-
-    itrs = 20
-    time_start_itr = 4
-    dtype = torch.bfloat16
-
     # Filter deprecation warning from torch internal usage
     warnings.filterwarnings(
         action='ignore',
@@ -66,38 +43,50 @@ def test_throughput(rank, world_size):
         f'torch.distributed.*_base is a private function and will be deprecated.*'
     )
 
-    dist.init_process_group('nccl', rank=rank, world_size=world_size)
-
+    # get configs
+    yaml_path, args_list = sys.argv[2], sys.argv[3:]
+    with open(yaml_path) as f:
+        yaml_cfg = om.load(f)
+    cli_cfg = om.from_cli(args_list)
+    cfg = om.merge(yaml_cfg, cli_cfg)
+    
+    # updt config
     cfg.model.init_device = 'cpu'
     cfg.model.loss_fn = 'torch_crossentropy'
 
-    if te_installed and (cfg.model.te_tx_layer or cfg.model.te_linears):
-        if rank == 0: 
-            warnings.warn(
-                "Transformer Engine is not installed! "
-                "Please install transformer engine with "
-                "pip install --upgrade git+https://github.com/NVIDIA/TransformerEngine.git@stable")
-    if te_installed and cfg.model.te_tx_layer:
-        if rank == 0: print('use attn_impl == Triton to take care of key_padding_mask with TransformerEngine...')
-        cfg.model.attn_impl = 'triton'
+    itrs = 20
+    time_start_itr = 4
+    dtype = torch.bfloat16
+    device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
+
+    print(f'{rank=}, {world_size=}')
+
+    if (cfg.model.te_tx_layer or cfg.model.te_linears) and not te_installed:
+        raise ValueError(
+            "Transformer Engine is not installed! "
+            "Please install transformer engine with "
+            "pip install --upgrade git+https://github.com/NVIDIA/TransformerEngine.git@stable")
+
+    world_group = dist.init_process_group('nccl', rank=rank, world_size=world_size)
+    data_parallel_group = torch.distributed.new_group(ranks=list(range(world_size)), backend="nccl")
+    tensor_parallel_group = torch.distributed.new_group(ranks=[rank], backend="nccl")
 
     # Build Model
     if rank == 0: print('Initializing model...')
-    model = build_composer_model(cfg.model, cfg.tokenizer)
+    model = build_composer_model(cfg.model, cfg.tokenizer, tensor_parallel_group)
     cfg.n_params = sum(p.numel() for p in model.parameters())
     if rank == 0: print(f'{cfg.n_params=:.2e}')
 
-    model = model.to(rank)
-    model = model.to(dtype)
+    model.to(rank)
 
     # construct DDP model
     if rank == 0: print(f'setting up DDP model')
-    model = DDP(model, device_ids=[rank])
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], process_group=data_parallel_group)
     # define optimizer
     if rank == 0: print(f'init optimizer')
     optimizer = optim.SGD(model.parameters(), lr=0.01)
 
-    model = model.to(dtype)
+    model.to(dtype)
 
     batch = {}
     batch['input_ids'] = torch.randint(low=0, high=cfg.model.vocab_size, size=(cfg.device_train_microbatch_size, cfg.max_seq_len)).to(rank)
@@ -106,7 +95,7 @@ def test_throughput(rank, world_size):
 
     loss_fn = model.module.loss
 
-    if device_type == 'a100':
+    if device_type == 'a100' or (cfg.model.te_tx_layer == False and cfg.model.te_linears == False):
         def fwd_loss(batch):
             with torch.autocast('cuda', dtype=dtype, enabled=True, cache_enabled=None):
                 outputs = model(batch)
@@ -114,10 +103,13 @@ def test_throughput(rank, world_size):
             return loss
     else:
         def fwd_loss(batch):
-            with torch.autocast('cuda', dtype=dtype, enabled=True, cache_enabled=None):
-                with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                    outputs = model(batch)
-                    loss = loss_fn(outputs, batch)
+            with te.fp8_autocast(
+                enabled=True,
+                fp8_recipe=DelayedScaling(), # fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max")
+                fp8_group=data_parallel_group,
+            ):
+                outputs = model(batch)
+                loss = loss_fn(outputs, batch)
             return loss
 
     torch.cuda.current_stream().synchronize()
@@ -133,6 +125,7 @@ def test_throughput(rank, world_size):
         loss.backward()
         # update parameters
         optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
 
     torch.cuda.current_stream().synchronize()
     elapsed_time = time.time() - t0

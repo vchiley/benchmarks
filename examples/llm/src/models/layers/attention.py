@@ -14,6 +14,12 @@ from composer.algorithms.low_precision_layernorm.low_precision_layernorm import 
 from einops import rearrange
 from torch import nn
 
+try:
+    import transformer_engine.pytorch as te
+    te_installed = True
+except ImportError:
+    te_installed = False
+
 
 def _reset_is_causal(num_query_tokens: int, num_key_tokens: int,
                      original_is_causal: bool):
@@ -250,6 +256,7 @@ class MultiheadAttention(nn.Module):
         softmax_scale: Optional[float] = None,
         attn_pdrop: float = 0.0,
         low_precision_layernorm: bool = False,
+        te_linears: bool = False,
         device: Optional[str] = None,
     ):
         super().__init__()
@@ -265,7 +272,11 @@ class MultiheadAttention(nn.Module):
             self.softmax_scale = 1 / math.sqrt(self.d_model / self.n_heads)
         self.attn_dropout_p = attn_pdrop
 
-        self.Wqkv = nn.Linear(self.d_model, 3 * self.d_model, device=device)
+        if te_installed and te_linears:
+             # init device is currently not supported with TransformerEngine
+             self.Wqkv = te.Linear(self.d_model, 3 * self.d_model)
+        else:
+            self.Wqkv = nn.Linear(self.d_model, 3 * self.d_model, device=device)
         # for param init fn; enables shape based init of fused layers
         fuse_splits = (d_model, 2 * d_model)
         self.Wqkv._fused = (0, fuse_splits)  # type: ignore
@@ -295,7 +306,11 @@ class MultiheadAttention(nn.Module):
         else:
             raise ValueError(f'{attn_impl=} is an invalid setting.')
 
-        self.out_proj = nn.Linear(self.d_model, self.d_model, device=device)
+        if te_installed and te_linears:
+             # init device is currently not supported with TransformerEngine
+             self.out_proj = te.Linear(self.d_model, self.d_model)
+        else:
+            self.out_proj = nn.Linear(self.d_model, self.d_model, device=device)
         self.out_proj._is_residual = True  # type: ignore
 
     def forward(self,
