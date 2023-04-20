@@ -54,7 +54,6 @@ def test_throughput(rank, world_size):
     
     # updt config
     cfg.model.init_device = 'cpu'
-    model.attn_impl = 'flash'
     cfg.pop('fsdp_config')
     cfg.model.te_tx_layer = False
     cfg.model.te_linears = False
