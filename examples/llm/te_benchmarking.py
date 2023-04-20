@@ -66,7 +66,7 @@ def test_throughput(rank, world_size):
 
     cfg.itrs = cfg.get('itrs', 20)
     cfg.time_start_itr = cfg.get('time_start_itr', 4)
-    cfg.dtype = torch.bfloat16 if 'bf' in cfg.precision else torch.float16
+    dtype = torch.bfloat16 if 'bf' in cfg.precision else torch.float16
     cfg.device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
 
     print(f'{rank=}, {world_size=}')
@@ -99,7 +99,7 @@ def test_throughput(rank, world_size):
     if rank == 0: print(f'init optimizer')
     optimizer = optim.SGD(model.parameters(), lr=0.01)
 
-    model.to(dtype=cfg.dtype)
+    model.to(dtype=dtype)
 
     if rank == 0: print(model)
 
@@ -110,13 +110,13 @@ def test_throughput(rank, world_size):
 
     if not cfg.fp8:
         def fwd_loss(batch):
-            with torch.autocast('cuda', dtype=cfg.dtype, enabled=True):
+            with torch.autocast('cuda', dtype=dtype, enabled=True):
                 outputs = model(batch)
                 loss = module.loss(outputs, batch)
             return loss
     else:
         def fwd_loss(batch):
-            with torch.autocast('cuda', dtype=cfg.dtype, enabled=True):
+            with torch.autocast('cuda', dtype=dtype, enabled=True):
                 with te.fp8_autocast(
                     enabled=True,
                     fp8_recipe=DelayedScaling(fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max"),
