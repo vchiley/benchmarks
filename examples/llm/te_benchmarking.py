@@ -151,7 +151,7 @@ def test_throughput(rank, world_size):
         if rank == 0: print(f'MFU: {100 * flopsps / 312e12:.4f}%')
     else:
         if rank == 0: print(f'MFU (fp16): {100 * flopsps / 1e15:.4f}%')
-        if rank == 0: print(f'MFU (fp8): {100 * flopsps / 2e15:.4f}%')
+        if fp8 and rank == 0: print(f'MFU (fp8): {100 * flopsps / 2e15:.4f}%')
 
 
 if __name__=="__main__":
