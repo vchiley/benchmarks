@@ -85,7 +85,7 @@ def test_throughput(rank, world_size):
     cfg.n_params = sum(p.numel() for p in model.parameters())
     if rank == 0: print(f'{cfg.n_params=:.2e}')
 
-    model.to(rank)
+    model.to(torch.device(f'cuda:{rank}'))
 
     # construct DDP model
     if rank == 0: print(f'setting up DDP model')
@@ -115,7 +115,7 @@ def test_throughput(rank, world_size):
             with torch.autocast('cuda', dtype=dtype, enabled=True):
                 with te.fp8_autocast(
                     enabled=True,
-                    fp8_recipe=DelayedScaling(), # fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max")
+                    fp8_recipe=DelayedScaling(fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max"),
                     fp8_group=data_parallel_group,
                 ):
                     outputs = model(batch)
