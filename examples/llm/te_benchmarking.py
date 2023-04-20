@@ -46,6 +46,7 @@ def test_throughput(rank, world_size):
     cfg = om.merge(yaml_cfg, cli_cfg)
 
     device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
+    cfg.model.te_tx_layer = False
     if device_type == 'h100':
         fp8_format = Format.HYBRID
         fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max")
