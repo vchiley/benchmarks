@@ -54,13 +54,11 @@ def test_throughput(rank, world_size):
     
     # updt config
     cfg.model.init_device = 'cpu'
-    cfg.model.attn_impl = 'flash'
-    cfg.model.loss_fn = 'torch_crossentropy'
     cfg.pop('fsdp_config')
-    cfg.model.te_tx_layer = cfg.model.get('te_tx_layer', False)
-    cfg.model.te_linears = cfg.model.get('te_linears', False)
+    cfg.model.te_tx_layer = False
+    cfg.model.te_linears = False
 
-    fp8 = cfg.get('fp8', False) and te_installed
+    fp8 = False
     if fp8 and not (cfg.model.te_tx_layer or cfg.model.te_linears):
         warnings.warn('TE layers not being used; nothing will cast to fp8.')
 
