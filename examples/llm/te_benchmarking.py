@@ -88,6 +88,7 @@ def test_throughput(rank, world_size):
     if rank == 0: print(f'{cfg.n_params=:.2e}')
 
     model = model.to(rank)
+    model = model.to(dtype)
 
     # construct DDP model
     if rank == 0: print(f'setting up DDP model')
