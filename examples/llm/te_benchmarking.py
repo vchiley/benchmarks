@@ -59,11 +59,11 @@ def test_throughput(rank, world_size):
     cfg.model.te_linears = cfg.model.get('te_linears', False)
 
     fp8 = cfg.get('fp8', False) and te_installed
-    if fp8 and not cfg.model.te_tx_layer and not cfg.model.te_linears:
+    if fp8 and not (cfg.model.te_tx_layer or cfg.model.te_linears):
         warnings.warn('TE layers not being used; nothing will cast to fp8.')
 
-    itrs = 20
-    time_start_itr = 4
+    itrs = cfg.get('itrs', 20)
+    time_start_itr = cfg.get('time_start_itr', 4)
     dtype = torch.bfloat16 if 'bf' in cfg.precision else torch.float16
     device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
 
@@ -94,6 +94,10 @@ def test_throughput(rank, world_size):
     # define optimizer
     if rank == 0: print(f'init optimizer')
     optimizer = optim.SGD(model.parameters(), lr=0.01)
+
+    model.to(dtype=dtype)
+
+    if rank == 0: print(model)
 
     batch = {}
     batch['input_ids'] = torch.randint(low=0, high=cfg.model.vocab_size, size=(cfg.device_train_microbatch_size, cfg.max_seq_len)).to(rank)
