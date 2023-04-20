@@ -13,8 +13,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-# from composer.utils import dist, get_device, reproducibility
-from composer.utils import get_device, reproducibility
 from omegaconf import OmegaConf as om
 
 from examples.llm.src import (COMPOSER_MODEL_REGISTRY,
@@ -52,7 +50,10 @@ def test_throughput(rank, world_size):
         fp8_format = Format.HYBRID
         fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max")
 
-    itrs = 16
+        cfg.model.te_tx_layer = True
+        cfg.model.te_linears = False
+
+    itrs = 20
     time_start_itr = 4
     dtype = torch.bfloat16
 
@@ -64,22 +65,20 @@ def test_throughput(rank, world_size):
         f'torch.distributed.*_base is a private function and will be deprecated.*'
     )
 
-    reproducibility.seed_all(cfg.seed)
-
-    if world_size > 1:
-        dist.init_process_group(get_device(None).dist_backend, rank=rank, world_size=world_size)
+    dist.init_process_group('nccl', rank=rank, world_size=world_size)
 
     cfg.model.init_device = 'cpu'
+    cfg.model.loss_fn = 'torch_crossentropy'
 
     te_config = cfg.get('te_config', None)
     te_config = om.to_container(te_config, resolve=True) if te_config else None
-    if not te_installed and te_config:
+    if not te_installed and (cfg.model.te_tx_layer or cfg.model.te_linears):
         if rank == 0: 
             warnings.warn(
                 "Transformer Engine is not installed but te_config is given! "
                 "Please install transformer engine with "
                 "pip install --upgrade git+https://github.com/NVIDIA/TransformerEngine.git@stable")
-    if not te_installed and (te_config and not te_config['linear_only']):
+    if not te_installed and cfg.model.te_tx_layer:
         if rank == 0: print('use attn_impl == Triton to take care of key_padding_mask with TransformerEngine...')
         cfg.model.attn_impl = 'triton'
 
@@ -92,9 +91,8 @@ def test_throughput(rank, world_size):
     model = model.to(rank)
 
     # construct DDP model
-    if world_size > 1:
-        if rank == 0: print(f'setting up DDP model')
-        model = DDP(model, device_ids=[rank])
+    if rank == 0: print(f'setting up DDP model')
+    model = DDP(model, device_ids=[rank])
     # define optimizer
     if rank == 0: print(f'init optimizer')
     optimizer = optim.SGD(model.parameters(), lr=0.01)
@@ -106,7 +104,7 @@ def test_throughput(rank, world_size):
     batch['labels'] = batch['input_ids'].clone().detach().to(rank)
     batch['attention_mask'] = torch.ones(cfg.device_train_microbatch_size, cfg.max_seq_len, dtype=torch.bool).to(rank)
 
-    loss_fn = model.module.loss if world_size > 1 else model.loss
+    loss_fn = model.module.loss
 
     if device_type == 'a100':
         def fwd_loss(batch):
@@ -116,9 +114,10 @@ def test_throughput(rank, world_size):
             return loss
     else:
         def fwd_loss(batch):
-            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                outputs = model(batch)
-                loss = loss_fn(outputs, batch)
+            with torch.autocast('cuda', dtype=dtype, enabled=True, cache_enabled=None):
+                with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+                    outputs = model(batch)
+                    loss = loss_fn(outputs, batch)
             return loss
 
     torch.cuda.current_stream().synchronize()
@@ -128,13 +127,12 @@ def test_throughput(rank, world_size):
 
         # forward pass
         loss = fwd_loss(batch)
+        if rank == 0: print(f'{loss.item()=}')
 
         # backward pass
         loss.backward()
         # update parameters
         optimizer.step()
-
-        if rank == 0: print(f'{loss=}')
 
     torch.cuda.current_stream().synchronize()
     elapsed_time = time.time() - t0
@@ -142,7 +140,7 @@ def test_throughput(rank, world_size):
     throughput = cfg.device_train_microbatch_size * cfg.max_seq_len * (itrs - time_start_itr) / elapsed_time
     if rank == 0: print(f'{throughput=:.4f} tok/sec')
 
-    fpb = model.module.flops_per_batch(batch) if world_size > 1 else model.flops_per_batch(batch)
+    fpb = model.module.flops_per_batch(batch)
     flopsps = fpb * (itrs - time_start_itr) / elapsed_time
     if rank == 0: print(f'{flopsps/1e12:.4f} TFLOPs/sec')
 
@@ -158,10 +156,7 @@ if __name__=="__main__":
     os.environ["MASTER_ADDR"], os.environ["MASTER_PORT"] = "localhost", "29500"
 
     world_size = int(sys.argv[1])
-    if world_size > 1:
-        mp.spawn(test_throughput,
-            args=(world_size,),
-            nprocs=world_size,
-            join=True)
-    else:
-        test_throughput(0, 1)
+    mp.spawn(test_throughput,
+        args=(world_size,),
+        nprocs=world_size,
+        join=True)

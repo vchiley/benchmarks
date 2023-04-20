@@ -74,12 +74,12 @@ class MosaicGPT(PreTrainedModel):
         if self.use_te:
             layers = nn.ModuleList([
                 te.TransformerLayer(
-                    hidden_size=cfg.d_model,
-                    ffn_hidden_size=cfg.mlp_ratio * cfg.d_model,
-                    num_attention_heads=cfg.n_heads,
+                    hidden_size=config.d_model,
+                    ffn_hidden_size=config.mlp_ratio * config.d_model,
+                    num_attention_heads=config.n_heads,
                     layernorm_epsilon=1e-5,
-                    attention_dropout=cfg.attn_pdrop,
-                    hidden_dropout=cfg.resid_pdrop) for _ in range(cfg.n_layers)])
+                    attention_dropout=config.attn_pdrop,
+                    hidden_dropout=config.resid_pdrop) for _ in range(config.n_layers)])
         else:
             layers = nn.ModuleList([
                 gpt_blocks.GPTBlock(device=config.init_device,
@@ -107,11 +107,11 @@ class MosaicGPT(PreTrainedModel):
                     )
             self.logit_scale = logit_scale
 
-        if config.init_device != 'meta':
-            print(
-                f'You are using {config.init_device=}, but you can also use config.init_device="meta" with Composer + FSDP for fast initialization.'
-            )
-            self.apply(self.param_init_fn)
+        # if config.init_device != 'meta':
+        #     print(
+        #         f'You are using {config.init_device=}, but you can also use config.init_device="meta" with Composer + FSDP for fast initialization.'
+        #     )
+        #     self.apply(self.param_init_fn)
 
         self.is_causal = not self.prefix_lm
 
@@ -368,7 +368,7 @@ class MosaicGPT(PreTrainedModel):
             # format and currently doesn't work if the input is not contiguous
             x = x.permute((1, 0, 2)).contiguous()
             for block in self.transformer.blocks:  # type: ignore
-                x = block(x, attn_mask)
+                x = block(x, attention_mask=None)
             x = x.permute((1, 0, 2)).contiguous()
         else:
             for b_idx, block in enumerate(self.transformer.blocks):  # type: ignore

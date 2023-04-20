@@ -129,6 +129,8 @@ class MosaicGPTConfig(PretrainedConfig):
         self.embedding_fraction = embedding_fraction
         self.low_precision_layernorm = low_precision_layernorm
         self.use_cache = use_cache
+        self.te_tx_layer = te_tx_layer
+        self.te_linears = te_linears
         if 'name' in kwargs:
             del kwargs['name']
         if 'loss_fn' in kwargs:
