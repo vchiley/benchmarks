@@ -70,15 +70,13 @@ def test_throughput(rank, world_size):
     cfg.model.init_device = 'cpu'
     cfg.model.loss_fn = 'torch_crossentropy'
 
-    te_config = cfg.get('te_config', None)
-    te_config = om.to_container(te_config, resolve=True) if te_config else None
-    if not te_installed and (cfg.model.te_tx_layer or cfg.model.te_linears):
+    if te_installed and (cfg.model.te_tx_layer or cfg.model.te_linears):
         if rank == 0: 
             warnings.warn(
-                "Transformer Engine is not installed but te_config is given! "
+                "Transformer Engine is not installed! "
                 "Please install transformer engine with "
                 "pip install --upgrade git+https://github.com/NVIDIA/TransformerEngine.git@stable")
-    if not te_installed and cfg.model.te_tx_layer:
+    if te_installed and cfg.model.te_tx_layer:
         if rank == 0: print('use attn_impl == Triton to take care of key_padding_mask with TransformerEngine...')
         cfg.model.attn_impl = 'triton'
 
