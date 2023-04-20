@@ -81,9 +81,9 @@ class MosaicGPT(PreTrainedModel):
                     attention_dropout=config.attn_pdrop,
                     hidden_dropout=config.resid_pdrop,
                     self_attn_mask_type='causal',
-                    set_parallel_mode=True,
+                    set_parallel_mode=tensor_parallel_group is not None,
                     tp_group=tensor_parallel_group,
-                    sequence_parallel=True,
+                    sequence_parallel=tensor_parallel_group is not None,
                 ) for _ in range(config.n_layers)])
         else:
             layers = nn.ModuleList([
@@ -374,7 +374,7 @@ class MosaicGPT(PreTrainedModel):
             x = x.permute((1, 0, 2)).contiguous()
             # print(x[0,0,:4])
             for block in self.transformer.blocks:  # type: ignore
-                x = block(x, attention_mask=None)
+                x = block(x)
                 # print(x[0,0,:4])
             x = x.permute((1, 0, 2)).contiguous()
             # print(x[0,0,:4])

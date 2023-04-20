@@ -52,11 +52,19 @@ def test_throughput(rank, world_size):
     
     # updt config
     cfg.model.init_device = 'cpu'
+    cfg.model.attn_impl = 'flash'
     cfg.model.loss_fn = 'torch_crossentropy'
+    cfg.pop('fsdp_config')
+    cfg.model.te_tx_layer = cfg.model.get('te_tx_layer', False)
+    cfg.model.te_linears = cfg.model.get('te_linears', False)
+
+    fp8 = cfg.get('fp8', False) and te_installed
+    if fp8 and not cfg.model.te_tx_layer and not cfg.model.te_linears:
+        warnings.warn('TE layers not being used; nothing will cast to fp8.')
 
     itrs = 20
     time_start_itr = 4
-    dtype = torch.bfloat16
+    dtype = torch.bfloat16 if 'bf' in cfg.precision else torch.float16
     device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
 
     print(f'{rank=}, {world_size=}')
@@ -82,34 +90,32 @@ def test_throughput(rank, world_size):
     # construct DDP model
     if rank == 0: print(f'setting up DDP model')
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], process_group=data_parallel_group)
+    module = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
     # define optimizer
     if rank == 0: print(f'init optimizer')
     optimizer = optim.SGD(model.parameters(), lr=0.01)
-
-    model.to(dtype)
 
     batch = {}
     batch['input_ids'] = torch.randint(low=0, high=cfg.model.vocab_size, size=(cfg.device_train_microbatch_size, cfg.max_seq_len)).to(rank)
     batch['labels'] = batch['input_ids'].clone().detach().to(rank)
     batch['attention_mask'] = torch.ones(cfg.device_train_microbatch_size, cfg.max_seq_len, dtype=torch.bool).to(rank)
 
-    loss_fn = model.module.loss
-
-    if device_type == 'a100' or (cfg.model.te_tx_layer == False and cfg.model.te_linears == False):
+    if not fp8:
         def fwd_loss(batch):
-            with torch.autocast('cuda', dtype=dtype, enabled=True, cache_enabled=None):
+            with torch.autocast('cuda', dtype=dtype, enabled=True):
                 outputs = model(batch)
-                loss = loss_fn(outputs, batch)
+                loss = module.loss(outputs, batch)
             return loss
     else:
         def fwd_loss(batch):
-            with te.fp8_autocast(
-                enabled=True,
-                fp8_recipe=DelayedScaling(), # fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max")
-                fp8_group=data_parallel_group,
-            ):
-                outputs = model(batch)
-                loss = loss_fn(outputs, batch)
+            with torch.autocast('cuda', dtype=dtype, enabled=True):
+                with te.fp8_autocast(
+                    enabled=True,
+                    fp8_recipe=DelayedScaling(), # fp8_format=Format.HYBRID, amax_history_len=16, amax_compute_algo="max")
+                    fp8_group=data_parallel_group,
+                ):
+                    outputs = model(batch)
+                    loss = module.loss(outputs, batch)
             return loss
 
     torch.cuda.current_stream().synchronize()
@@ -125,7 +131,7 @@ def test_throughput(rank, world_size):
         loss.backward()
         # update parameters
         optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad()
 
     torch.cuda.current_stream().synchronize()
     elapsed_time = time.time() - t0
@@ -133,7 +139,7 @@ def test_throughput(rank, world_size):
     throughput = cfg.device_train_microbatch_size * cfg.max_seq_len * (itrs - time_start_itr) / elapsed_time
     if rank == 0: print(f'{throughput=:.4f} tok/sec')
 
-    fpb = model.module.flops_per_batch(batch)
+    fpb = module.flops_per_batch(batch)
     flopsps = fpb * (itrs - time_start_itr) / elapsed_time
     if rank == 0: print(f'{flopsps/1e12:.4f} TFLOPs/sec')
 
