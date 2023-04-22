@@ -89,14 +89,14 @@ def test_throughput(rank, world_size):
 
     # construct FSDP model
     if rank == 0: print(f'setting up FSDP model')
-    def _auto_wrap_policy(module: torch.nn.Module, recurse: bool, nonwrapped_numel: int) -> bool:
+    def _auto_wrap_policy(module: torch.nn.Module, recurse: bool, unwrapped_params: int) -> bool:
         if recurse:
             return True
         should_be_wrapped = False
         if hasattr(module, '_fsdp_wrap'):
             should_be_wrapped = bool(module._fsdp_wrap)
         else:
-            is_large = nonwrapped_numel >= 1e28
+            is_large = unwrapped_params >= 1e28
             if hasattr(model.model, 'fsdp_wrap_fn'):
                 should_be_wrapped = model.model.fsdp_wrap_fn(module) or is_large
             else:
@@ -112,15 +112,13 @@ def test_throughput(rank, world_size):
         cpu_offload=None,
         auto_wrap_policy=_auto_wrap_policy,
         backward_prefetch=fsdp.BackwardPrefetch.BACKWARD_PRE,
-        mixed_precision=fsdp.MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16, keep_low_precision_grads=False, cast_forward_inputs=False, cast_root_forward_inputs=True),
+        mixed_precision=fsdp.MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
         ignored_modules=None,
         param_init_fn=None,
         device_id=torch.cuda.current_device(),
         sync_module_states=False,
         forward_prefetch=True,
         limit_all_gathers=True,
-        use_orig_params=False,
-        ignored_parameters=None,
     )
 
     module = model
