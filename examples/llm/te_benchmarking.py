@@ -58,16 +58,18 @@ def test_throughput(rank, world_size):
     cfg.model.te_tx_layer = False
     cfg.model.te_linears = False
 
-    fp8 = False
-    if fp8 and not (cfg.model.te_tx_layer or cfg.model.te_linears):
+    cfg.fp8 = cfg.get('fp8', False) and te_installed
+    if cfg.fp8 and not (cfg.model.te_tx_layer or cfg.model.te_linears):
         warnings.warn('TE layers not being used; nothing will cast to fp8.')
 
-    itrs = cfg.get('itrs', 20)
-    time_start_itr = cfg.get('time_start_itr', 4)
+    cfg.itrs = cfg.get('itrs', 20)
+    cfg.time_start_itr = cfg.get('time_start_itr', 4)
     dtype = torch.bfloat16 if 'bf' in cfg.precision else torch.float16
-    device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
+    cfg.device_type = 'a100' if 'a100' in torch.cuda.get_device_name(0).lower() else 'h100'
 
     print(f'{rank=}, {world_size=}')
+
+    if rank == 0: print(cfg)
 
     if (cfg.model.te_tx_layer or cfg.model.te_linears) and not te_installed:
         raise ValueError(
@@ -104,7 +106,7 @@ def test_throughput(rank, world_size):
     batch['labels'] = batch['input_ids'].clone().detach().to(rank)
     batch['attention_mask'] = torch.ones(cfg.device_train_microbatch_size, cfg.max_seq_len, dtype=torch.bool).to(rank)
 
-    if not fp8:
+    if not cfg.fp8:
         def fwd_loss(batch):
             with torch.autocast('cuda', dtype=dtype, enabled=True):
                 outputs = model(batch)
@@ -123,8 +125,8 @@ def test_throughput(rank, world_size):
             return loss
 
     torch.cuda.current_stream().synchronize()
-    for itr in range(itrs):
-        if itr == time_start_itr:
+    for itr in range(cfg.itrs):
+        if itr == cfg.time_start_itr:
             t0 = time.time()
 
         # forward pass
@@ -140,18 +142,18 @@ def test_throughput(rank, world_size):
     torch.cuda.current_stream().synchronize()
     elapsed_time = time.time() - t0
 
-    throughput = cfg.device_train_microbatch_size * cfg.max_seq_len * (itrs - time_start_itr) / elapsed_time
+    throughput = cfg.device_train_microbatch_size * cfg.max_seq_len * (cfg.itrs - cfg.time_start_itr) / elapsed_time
     if rank == 0: print(f'{throughput=:.4f} tok/sec')
 
     fpb = module.flops_per_batch(batch)
-    flopsps = fpb * (itrs - time_start_itr) / elapsed_time
+    flopsps = fpb * (cfg.itrs - cfg.time_start_itr) / elapsed_time
     if rank == 0: print(f'{flopsps/1e12:.4f} TFLOPs/sec')
 
-    if device_type == 'a100':
+    if cfg.device_type == 'a100':
         if rank == 0: print(f'MFU: {100 * flopsps / 312e12:.4f}%')
     else:
         if rank == 0: print(f'MFU (fp16): {100 * flopsps / 1e15:.4f}%')
-        if fp8 and rank == 0: print(f'MFU (fp8): {100 * flopsps / 2e15:.4f}%')
+        if cfg.fp8 and rank == 0: print(f'MFU (fp8): {100 * flopsps / 2e15:.4f}%')
 
 
 if __name__=="__main__":
