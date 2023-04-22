@@ -421,11 +421,11 @@ class MosaicGPT(PreTrainedModel):
 
     # FSDP Wrap function
     def fsdp_wrap_fn(self, module):
-        return isinstance(module, gpt_blocks.GPTBlock)
+        return isinstance(module, (gpt_blocks.GPTBlock, te.TransformerLayer))
 
     # Activation Checkpointing
     def activation_checkpointing_fn(self, module):
-        return isinstance(module, gpt_blocks.GPTBlock)
+        return isinstance(module, (gpt_blocks.GPTBlock, te.TransformerLayer))
 
     def prepare_inputs_for_generation(self,
                                       input_ids,
