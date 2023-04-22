@@ -122,7 +122,7 @@ def test_throughput(rank, world_size):
         device_id=torch.cuda.current_device(),
         sync_module_states=False,
         forward_prefetch=True,
-        limit_all_gathers=False,
+        limit_all_gathers=True,
         use_orig_params=False,
         ignored_parameters=None,
     )
